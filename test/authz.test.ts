@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/lib/db";
-import { requireMember } from "@/server/authz";
+import { requireMember, requireMemberFor } from "@/server/authz";
 import { ForbiddenError } from "@/server/errors";
-import type { Group, User } from "@/generated/prisma/client";
+import type { Group, GroupMember, User } from "@/generated/prisma/client";
 import { resetDb } from "./db";
-import { addMember, createGroup, createUser } from "./factories";
+import { addMember, createCommentRow, createExpenseRow, createGroup, createSettlementRow, createUser, memberOf } from "./factories";
 
 beforeEach(resetDb);
 
@@ -99,5 +99,66 @@ describe("requireMember", () => {
     await addMember(g.id, { userId: member.id });
     await expect(requireMember(member.id, g.id, { role: "admin" })).rejects.toBeInstanceOf(ForbiddenError);
     await expect(requireMember(owner.id, g.id, { role: "admin" })).resolves.toBeDefined();
+  });
+});
+
+describe("requireMemberFor", () => {
+  let ownerMember: GroupMember;
+  let ids: Record<"expense" | "settlement" | "comment", string>;
+  beforeEach(async () => {
+    ownerMember = await memberOf(g.id, owner.id);
+    const other = await addMember(g.id, { displayName: "Rahul" });
+    const expense = await createExpenseRow(g.id, {
+      createdByMemberId: ownerMember.id,
+      payers: [[ownerMember.id, 1000n]],
+      shares: [[ownerMember.id, 500n], [other.id, 500n]],
+    });
+    const settlement = await createSettlementRow(g.id, {
+      fromMemberId: other.id,
+      toMemberId: ownerMember.id,
+      amount: 500n,
+      createdByMemberId: other.id,
+    });
+    const comment = await createCommentRow({ groupId: g.id, authorMemberId: ownerMember.id, expenseId: expense.id });
+    ids = { expense: expense.id, settlement: settlement.id, comment: comment.id };
+  });
+
+  it.each(["expense", "settlement", "comment"] as const)("finds a %s's group for a member", async (entity) => {
+    const { member, group, row } = await requireMemberFor(owner.id, entity, ids[entity]);
+    expect([member.id, group.id, row.id]).toEqual([ownerMember.id, g.id, ids[entity]]);
+  });
+
+  it.each(["expense", "settlement", "comment"] as const)("forbids an outsider from a %s", async (entity) =>
+    await expect(requireMemberFor(stranger.id, entity, ids[entity])).rejects.toBeInstanceOf(ForbiddenError));
+
+  it("forbids someone who left the group", async () => {
+    await addMember(g.id, { userId: stranger.id, leftAt: new Date() });
+    await expect(requireMemberFor(stranger.id, "expense", ids.expense)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("forbids an id that doesn't exist, the same as an outsider", async () => {
+    const errors = await Promise.all(
+      [requireMemberFor(owner.id, "expense", "nope"), requireMemberFor(stranger.id, "expense", ids.expense)].map((p) => p.catch((e: unknown) => e)),
+    );
+    for (const e of errors) expect(e).toBeInstanceOf(ForbiddenError);
+  });
+
+  it("passes the role option on to requireMember", async () => {
+    const member = await createUser();
+    await addMember(g.id, { userId: member.id });
+    await expect(requireMemberFor(member.id, "expense", ids.expense, { role: "admin" })).rejects.toBeInstanceOf(ForbiddenError);
+    await expect(requireMemberFor(owner.id, "expense", ids.expense, { role: "admin" })).resolves.toBeDefined();
+  });
+
+  it("refuses writes in an archived group", async () => {
+    await db.group.update({ where: { id: g.id }, data: { archivedAt: new Date() } });
+    await expect(requireMemberFor(owner.id, "expense", ids.expense, { write: true })).rejects.toThrow("This group is archived.");
+    await expect(requireMemberFor(owner.id, "expense", ids.expense)).resolves.toBeDefined();
+  });
+
+  it("still finds a soft-deleted row", async () => {
+    await db.expense.update({ where: { id: ids.expense }, data: { deletedAt: new Date() } });
+    const { row } = await requireMemberFor(owner.id, "expense", ids.expense);
+    expect(row.deletedAt).toBeInstanceOf(Date);
   });
 });

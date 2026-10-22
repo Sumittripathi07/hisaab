@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { displayNameSchema } from "@/lib/validation";
 import { defineAction } from "@/server/action";
-import { ForbiddenError, NotFoundError, UserError } from "@/server/errors";
+import { ConflictError, ForbiddenError, NotFoundError, UserError } from "@/server/errors";
 import type { SessionUser } from "@/server/session";
 
 const fakeUser: SessionUser = {
@@ -40,6 +40,13 @@ describe("defineAction", () => {
         throw new UserError("Nope");
       }),
     ).toEqual({ ok: false, error: "Nope" }));
+
+  it("maps ConflictError to its message with a conflict code", async () =>
+    expect(
+      await run(async () => {
+        throw new ConflictError("Ravi edited this just now — reload?");
+      }),
+    ).toEqual({ ok: false, error: "Ravi edited this just now — reload?", code: "conflict" }));
 
   it("maps NotFoundError to its message", async () =>
     expect(

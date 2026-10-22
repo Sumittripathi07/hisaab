@@ -1,9 +1,9 @@
 import { redirect, unstable_rethrow } from "next/navigation";
 import { z } from "zod";
-import { ForbiddenError, NotFoundError, UserError } from "@/server/errors";
+import { ConflictError, ForbiddenError, NotFoundError, UserError } from "@/server/errors";
 import { requireUser, type SessionUser } from "@/server/session";
 
-export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
+export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string; code?: "conflict" };
 
 /**
  * Wraps a server action: signs the caller in, validates `input` against `schema`, runs `handler`,
@@ -27,6 +27,7 @@ export function defineAction<S extends z.ZodType, R>(
     } catch (error) {
       unstable_rethrow(error); // redirect() and notFound() are thrown errors that Next must see
       if (error instanceof z.ZodError) return { ok: false, error: error.issues[0].message };
+      if (error instanceof ConflictError) return { ok: false, error: error.message, code: "conflict" };
       if (error instanceof UserError || error instanceof NotFoundError) return { ok: false, error: error.message };
       if (error instanceof ForbiddenError) return { ok: false, error: "You don't have access to this group." };
       console.error(error);

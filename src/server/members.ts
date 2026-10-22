@@ -5,6 +5,7 @@ import { newClaimToken, newInviteCode } from "@/lib/tokens";
 import type { PlaceholderInput } from "@/lib/validation";
 import { inviteEmail } from "@/emails/invite";
 import { Prisma, type GroupMember } from "@/generated/prisma/client";
+import { recordActivity } from "./activity";
 import { requireMember } from "./authz";
 import { ForbiddenError, NotFoundError, UserError } from "./errors";
 
@@ -50,7 +51,7 @@ export async function addPlaceholder(
   groupId: string,
   input: PlaceholderInput,
 ): Promise<{ member: GroupMember; emailSent: boolean | null }> {
-  const { group } = await requireMember(userId, groupId, { write: true });
+  const { group, member: actor } = await requireMember(userId, groupId, { write: true });
   const email = input.email?.toLowerCase();
   if (email) {
     // ponytail: compares in JS over the group's rows (a handful to a few dozen); use SQL lower(email) if groups ever get huge.
@@ -66,7 +67,17 @@ export async function addPlaceholder(
   }
 
   const claimToken = newClaimToken();
-  const member = await db.groupMember.create({ data: { groupId, displayName: input.displayName, email, claimToken } });
+  const member = await db.$transaction(async (tx) => {
+    const created = await tx.groupMember.create({ data: { groupId, displayName: input.displayName, email, claimToken } });
+    await recordActivity(tx, {
+      groupId,
+      actorMemberId: actor.id,
+      kind: "member.added",
+      entityId: created.id,
+      payload: { memberId: created.id, displayName: created.displayName },
+    });
+    return created;
+  });
   if (!email) return { member, emailSent: null };
 
   const inviter = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } });
@@ -135,25 +146,45 @@ export async function joinByInviteCode(userId: string, code: string): Promise<{ 
   if (isMember) return { groupId };
 
   try {
-    if (existing) {
-      // Back as a plain member, so someone removed as an admin can't take the role back through the public link.
-      await db.groupMember.update({ where: { id: existing.id }, data: { leftAt: null, joinedAt: new Date(), role: "MEMBER" } });
-    } else {
-      const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, email: true } });
-      const placeholder = await db.groupMember.findFirst({
-        where: { groupId, userId: null, leftAt: null, email: user.email.toLowerCase() },
-        orderBy: { createdAt: "asc" },
-        select: { id: true },
-      });
-      // Conditional, so a placeholder someone else just claimed isn't taken twice; then we fall back to a new row.
-      const claimed = placeholder
-        ? await db.groupMember.updateMany({
-            where: { id: placeholder.id, userId: null, leftAt: null },
-            data: { userId, claimToken: null, displayName: user.name, joinedAt: new Date() },
-          })
-        : { count: 0 };
-      if (claimed.count === 0) await db.groupMember.create({ data: { groupId, userId, displayName: user.name } });
-    }
+    await db.$transaction(async (tx) => {
+      let joined: { id: string; displayName: string } | null;
+      if (existing) {
+        // Back as a plain member, so someone removed as an admin can't take the role back through the public link.
+        // Conditional on still being gone: of two taps at once, only the one that brings them back logs it.
+        const back = await tx.groupMember.updateMany({
+          where: { id: existing.id, leftAt: { not: null } },
+          data: { leftAt: null, joinedAt: new Date(), role: "MEMBER" },
+        });
+        joined = back.count === 1 ? existing : null;
+      } else {
+        const user = await tx.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, email: true } });
+        const placeholder = await tx.groupMember.findFirst({
+          where: { groupId, userId: null, leftAt: null, email: user.email.toLowerCase() },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        // Conditional, so a placeholder someone else just claimed isn't taken twice; then we fall back to a new row.
+        const claimed = placeholder
+          ? await tx.groupMember.updateMany({
+              where: { id: placeholder.id, userId: null, leftAt: null },
+              data: { userId, claimToken: null, displayName: user.name, joinedAt: new Date() },
+            })
+          : { count: 0 };
+        joined =
+          placeholder && claimed.count === 1
+            ? { id: placeholder.id, displayName: user.name }
+            : await tx.groupMember.create({ data: { groupId, userId, displayName: user.name } });
+      }
+      if (joined) {
+        await recordActivity(tx, {
+          groupId,
+          actorMemberId: joined.id,
+          kind: "member.joined",
+          entityId: joined.id,
+          payload: { memberId: joined.id, displayName: joined.displayName },
+        });
+      }
+    });
   } catch (error) {
     // A parallel join of ours won the (groupId, userId) unique: the person is in, which is all this call promises.
     if (!isUniqueViolation(error) || !(await isActiveMember(userId, groupId))) throw error;
@@ -208,11 +239,20 @@ export async function claimPlaceholder(userId: string, token: string): Promise<{
   const { groupId } = placeholder;
 
   try {
-    const claimed = await db.groupMember.updateMany({
-      where: { id: placeholder.id, claimToken: token, userId: null, leftAt: null },
-      data: { userId, claimToken: null, displayName: user.name, joinedAt: new Date() },
+    await db.$transaction(async (tx) => {
+      const claimed = await tx.groupMember.updateMany({
+        where: { id: placeholder.id, claimToken: token, userId: null, leftAt: null },
+        data: { userId, claimToken: null, displayName: user.name, joinedAt: new Date() },
+      });
+      if (claimed.count === 0) throw new NotFoundError(USED_LINK);
+      await recordActivity(tx, {
+        groupId,
+        actorMemberId: placeholder.id,
+        kind: "member.joined",
+        entityId: placeholder.id,
+        payload: { memberId: placeholder.id, displayName: user.name },
+      });
     });
-    if (claimed.count === 0) throw new NotFoundError(USED_LINK);
   } catch (error) {
     // Two claims by one person at once: the other one won the (groupId, userId) unique.
     if (isUniqueViolation(error)) throw new UserError("You're already in this group.");
@@ -236,11 +276,20 @@ export async function removeMember(userId: string, memberId: string): Promise<vo
   if (target.role === "OWNER") throw new UserError("The owner can't be removed.");
   if (target.role === "ADMIN" && actor.role !== "OWNER") throw new ForbiddenError();
   // Conditional on the role we checked: if ownership just moved to them, this must not remove the new owner.
-  const { count } = await db.groupMember.updateMany({
-    where: { id: target.id, role: target.role, leftAt: null },
-    data: { leftAt: new Date() },
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.groupMember.updateMany({
+      where: { id: target.id, role: target.role, leftAt: null },
+      data: { leftAt: new Date() },
+    });
+    if (count === 0) throw new UserError(STALE);
+    await recordActivity(tx, {
+      groupId: target.groupId,
+      actorMemberId: actor.id,
+      kind: "member.removed",
+      entityId: target.id,
+      payload: { memberId: target.id, displayName: target.displayName },
+    });
   });
-  if (count === 0) throw new UserError(STALE);
 }
 
 export async function setMemberRole(userId: string, memberId: string, role: "ADMIN" | "MEMBER"): Promise<void> {
@@ -279,9 +328,18 @@ export async function leaveGroup(userId: string, groupId: string): Promise<void>
   const { member } = await requireMember(userId, groupId);
   if (member.role === "OWNER") throw new UserError("Transfer ownership before leaving.");
   // Conditional on the role we checked, so becoming the owner in the meantime can't leave the group ownerless.
-  const { count } = await db.groupMember.updateMany({
-    where: { id: member.id, role: member.role, leftAt: null },
-    data: { leftAt: new Date() },
+  await db.$transaction(async (tx) => {
+    const { count } = await tx.groupMember.updateMany({
+      where: { id: member.id, role: member.role, leftAt: null },
+      data: { leftAt: new Date() },
+    });
+    if (count === 0) throw new UserError(STALE);
+    await recordActivity(tx, {
+      groupId,
+      actorMemberId: member.id,
+      kind: "member.left",
+      entityId: member.id,
+      payload: { memberId: member.id, displayName: member.displayName },
+    });
   });
-  if (count === 0) throw new UserError(STALE);
 }

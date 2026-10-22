@@ -1,6 +1,15 @@
 import { db } from "@/lib/db";
 import { newInviteCode } from "@/lib/tokens";
-import type { Group, GroupMember, MemberRole, User } from "@/generated/prisma/client";
+import type {
+  Comment,
+  Expense,
+  Group,
+  GroupMember,
+  MemberRole,
+  Settlement,
+  SettlementStatus,
+  User,
+} from "@/generated/prisma/client";
 
 let counter = 0;
 
@@ -46,4 +55,77 @@ export async function addMember(
 ): Promise<GroupMember> {
   const user = data.userId ? await db.user.findUniqueOrThrow({ where: { id: data.userId } }) : null;
   return db.groupMember.create({ data: { ...data, groupId, displayName: data.displayName ?? user?.name ?? "Placeholder" } });
+}
+
+/** The member row `userId` has in the group, whether or not they have left. */
+export function memberOf(groupId: string, userId: string): Promise<GroupMember> {
+  return db.groupMember.findUniqueOrThrow({ where: { groupId_userId: { groupId, userId } } });
+}
+
+/**
+ * An expense written straight to the tables, as the group's own currency: `amount` is the sum of the payers and the
+ * method EXACT. It skips the service's rules, so use it for what hangs off an expense, not for testing the rules.
+ * `splitInput` is left empty for the same reason.
+ */
+export async function createExpenseRow(
+  groupId: string,
+  data: {
+    createdByMemberId: string;
+    payers: [string, bigint][];
+    shares: [string, bigint][];
+    description?: string;
+    deletedAt?: Date;
+  },
+): Promise<Expense> {
+  const { baseCurrency } = await db.group.findUniqueOrThrow({ where: { id: groupId }, select: { baseCurrency: true } });
+  const amount = data.payers.reduce((sum, [, paid]) => sum + paid, 0n);
+  const rows = (pairs: [string, bigint][]) => ({
+    create: pairs.map(([memberId, value]) => ({ memberId, amount: value, baseAmount: value })),
+  });
+  return db.expense.create({
+    data: {
+      groupId,
+      description: data.description ?? "Dinner",
+      category: "other",
+      date: new Date("2026-01-15"),
+      currency: baseCurrency,
+      amount,
+      baseAmount: amount,
+      splitMethod: "EXACT",
+      splitInput: {},
+      createdByMemberId: data.createdByMemberId,
+      deletedAt: data.deletedAt,
+      payers: rows(data.payers),
+      shares: rows(data.shares),
+    },
+  });
+}
+
+/** A settlement (UPI, in the group's own currency) written straight to the table. */
+export async function createSettlementRow(
+  groupId: string,
+  data: {
+    fromMemberId: string;
+    toMemberId: string;
+    amount: bigint;
+    createdByMemberId: string;
+    status?: SettlementStatus;
+    deletedAt?: Date;
+  },
+): Promise<Settlement> {
+  const { baseCurrency } = await db.group.findUniqueOrThrow({ where: { id: groupId }, select: { baseCurrency: true } });
+  return db.settlement.create({
+    data: { ...data, groupId, currency: baseCurrency, baseAmount: data.amount, method: "UPI", date: new Date("2026-01-15") },
+  });
+}
+
+/** A comment on an expense or a settlement (the caller gives one of the two ids). */
+export function createCommentRow(data: {
+  groupId: string;
+  authorMemberId: string;
+  expenseId?: string;
+  settlementId?: string;
+  body?: string;
+}): Promise<Comment> {
+  return db.comment.create({ data: { ...data, body: data.body ?? "Looks right" } });
 }

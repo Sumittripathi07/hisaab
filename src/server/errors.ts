@@ -6,6 +6,14 @@ export class UserError extends Error {
   }
 }
 
+/** Someone else changed the thing since this person loaded it. The message says who; the client offers a reload. */
+export class ConflictError extends UserError {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConflictError";
+  }
+}
+
 /** The signed-in person is not allowed to touch this group. */
 export class ForbiddenError extends Error {
   constructor() {
