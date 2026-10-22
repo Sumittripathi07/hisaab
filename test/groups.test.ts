@@ -8,7 +8,7 @@ import { archiveGroup, createGroup, getGroupDetail, listGroupsForUser, unarchive
 import type { SessionUser } from "@/server/session";
 import type { User } from "@/generated/prisma/client";
 import { resetDb } from "./db";
-import { addMember, createGroup as makeGroup, createUser } from "./factories";
+import { addMember, createExpenseRow, createGroup as makeGroup, createSettlementRow, createUser, memberOf } from "./factories";
 
 // The action tests sign in as whoever `session.user` is; next/cache needs a request, so it's stubbed.
 const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
@@ -90,6 +90,37 @@ describe("updateGroup", () => {
   it("refuses to edit an archived group", async () => {
     const g = await makeGroup(asha.id, { archivedAt: new Date() });
     await expect(updateGroup(asha.id, g.id, input())).rejects.toThrow("This group is archived.");
+  });
+
+  it("locks the currency once the group has an expense or a payment, deleted ones included", async () => {
+    const LOCKED = "The currency can't change once the group has expenses or payments.";
+    const [withExpense, withDeleted, withPayment, empty] = [
+      await makeGroup(asha.id),
+      await makeGroup(asha.id),
+      await makeGroup(asha.id),
+      await makeGroup(asha.id),
+    ];
+    const me = async (groupId: string) => (await memberOf(groupId, asha.id)).id;
+    /** ₹1 that Asha paid for herself. */
+    const ownExpense = async (groupId: string, deletedAt?: Date) => {
+      const id = await me(groupId);
+      await createExpenseRow(groupId, { createdByMemberId: id, payers: [[id, 100n]], shares: [[id, 100n]], deletedAt });
+    };
+    await ownExpense(withExpense.id);
+    await ownExpense(withDeleted.id, new Date());
+    const rahul = (await addMember(withPayment.id, { displayName: "Rahul" })).id;
+    await createSettlementRow(withPayment.id, { fromMemberId: rahul, toMemberId: await me(withPayment.id), amount: 100n, createdByMemberId: rahul });
+
+    for (const g of [withExpense, withDeleted, withPayment]) {
+      expect((await getGroupDetail(asha.id, g.id)).currencyLocked).toBe(true);
+      await expect(updateGroup(asha.id, g.id, input({ baseCurrency: "USD" }))).rejects.toThrow(LOCKED);
+      expect((await db.group.findUniqueOrThrow({ where: { id: g.id } })).baseCurrency).toBe("INR");
+      // Everything else can still change.
+      await expect(updateGroup(asha.id, g.id, input({ name: "Renamed" }))).resolves.toMatchObject({ name: "Renamed", baseCurrency: "INR" });
+    }
+
+    expect((await getGroupDetail(asha.id, empty.id)).currencyLocked).toBe(false);
+    await expect(updateGroup(asha.id, empty.id, input({ baseCurrency: "USD" }))).resolves.toMatchObject({ baseCurrency: "USD" });
   });
 });
 
@@ -174,12 +205,21 @@ describe("listGroupsForUser", () => {
     const [item] = (await listGroupsForUser(asha.id)).active;
     expect(item).toMatchObject({ id: g.id, name: "Flat 4B", emoji: "🏠", color: "teal", type: "HOME", baseCurrency: "USD", memberCount: 7 });
     expect(Object.keys(item).sort()).toEqual(
-      ["baseCurrency", "color", "emoji", "id", "memberCount", "name", "previewMembers", "type"].sort(),
+      ["baseCurrency", "color", "emoji", "id", "memberCount", "myNet", "name", "previewMembers", "type"].sort(),
     );
     expect(item.previewMembers).toHaveLength(5);
     expect(item.previewMembers).toContainEqual({ displayName: "Asha", image: null });
     expect(item.previewMembers).toContainEqual({ displayName: "Photo", image: "https://example.test/p.jpg" });
     expect(item.previewMembers).toContainEqual({ displayName: "Ghost", image: null });
+  });
+
+  it("returns my balance in each group, zero where there's no money", async () => {
+    const [owed, quiet] = [await makeGroup(asha.id), await makeGroup(asha.id)];
+    const me = await memberOf(owed.id, asha.id);
+    const rahul = await addMember(owed.id, { displayName: "Rahul" });
+    await createExpenseRow(owed.id, { createdByMemberId: me.id, payers: [[me.id, 33333n]], shares: [[rahul.id, 33333n]] });
+    const nets = Object.fromEntries((await listGroupsForUser(asha.id)).active.map((x) => [x.id, x.myNet]));
+    expect(nets).toEqual({ [owed.id]: 33333n, [quiet.id]: 0n });
   });
 
   it("previews nobody who has left", async () => {

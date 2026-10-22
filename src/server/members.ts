@@ -1,12 +1,14 @@
 import { db } from "@/lib/db";
 import { EmailRateLimitError, sendEmail } from "@/lib/email";
 import { env } from "@/lib/env";
+import { formatMoney } from "@/lib/money/format";
 import { newClaimToken, newInviteCode } from "@/lib/tokens";
 import type { PlaceholderInput } from "@/lib/validation";
 import { inviteEmail } from "@/emails/invite";
 import { Prisma, type GroupMember } from "@/generated/prisma/client";
 import { recordActivity } from "./activity";
 import { requireMember } from "./authz";
+import { groupNets } from "./balances";
 import { ForbiddenError, NotFoundError, UserError } from "./errors";
 
 const ARCHIVED = "This group is archived.";
@@ -35,9 +37,19 @@ const isActiveMember = async (userId: string, groupId: string) =>
 async function requireTarget(userId: string, memberId: string, opts: Parameters<typeof requireMember>[2]) {
   const target = await db.groupMember.findUnique({ where: { id: memberId } });
   if (!target) throw new ForbiddenError();
-  const { member: actor } = await requireMember(userId, target.groupId, opts);
+  const { member: actor, group } = await requireMember(userId, target.groupId, opts);
   if (target.leftAt) throw new NotFoundError("They're not in this group.");
-  return { target, actor };
+  return { target, actor, group };
+}
+
+/**
+ * The member's net in the group and that amount formatted, for refusing to let anyone leave owing or owed.
+ * ponytail: checked before the write, so an expense saved at the same moment can slip in; whoever left then still shows
+ * in balances and can be settled with. Lock the member row if that ever needs closing.
+ */
+async function balanceOf(group: { id: string; baseCurrency: string }, memberId: string) {
+  const net = (await groupNets(group.id)).get(memberId) ?? 0n;
+  return { net, amount: formatMoney(net < 0n ? -net : net, group.baseCurrency) };
 }
 
 /**
@@ -272,9 +284,12 @@ export async function regenerateClaimToken(userId: string, memberId: string): Pr
 }
 
 export async function removeMember(userId: string, memberId: string): Promise<void> {
-  const { target, actor } = await requireTarget(userId, memberId, { role: "admin", write: true });
+  const { target, actor, group } = await requireTarget(userId, memberId, { role: "admin", write: true });
   if (target.role === "OWNER") throw new UserError("The owner can't be removed.");
   if (target.role === "ADMIN" && actor.role !== "OWNER") throw new ForbiddenError();
+  const { net, amount } = await balanceOf(group, target.id);
+  if (net < 0n) throw new UserError(`${target.displayName} still owes ${amount}. Settle up before removing them.`);
+  if (net > 0n) throw new UserError(`${target.displayName} is still owed ${amount}. Settle up before removing them.`);
   // Conditional on the role we checked: if ownership just moved to them, this must not remove the new owner.
   await db.$transaction(async (tx) => {
     const { count } = await tx.groupMember.updateMany({
@@ -325,8 +340,11 @@ export async function transferOwnership(userId: string, memberId: string): Promi
 
 /** Archived groups can be left too: leaving is how someone clears one from their list. */
 export async function leaveGroup(userId: string, groupId: string): Promise<void> {
-  const { member } = await requireMember(userId, groupId);
+  const { member, group } = await requireMember(userId, groupId);
   if (member.role === "OWNER") throw new UserError("Transfer ownership before leaving.");
+  const { net, amount } = await balanceOf(group, member.id);
+  if (net < 0n) throw new UserError(`Settle up before leaving: you owe ${amount}.`);
+  if (net > 0n) throw new UserError(`Settle up before leaving: you're owed ${amount}.`);
   // Conditional on the role we checked, so becoming the owner in the meantime can't leave the group ownerless.
   await db.$transaction(async (tx) => {
     const { count } = await tx.groupMember.updateMany({

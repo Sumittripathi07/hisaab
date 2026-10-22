@@ -30,7 +30,7 @@ import {
 import type { SessionUser } from "@/server/session";
 import type { Group, GroupMember, User } from "@/generated/prisma/client";
 import { resetDb } from "./db";
-import { addMember, createGroup, createUser } from "./factories";
+import { addMember, createExpenseRow, createGroup, createSettlementRow, createUser } from "./factories";
 import { clearOutbox, lastEmailTo, readOutbox } from "./outbox";
 
 // The action tests sign in as whoever `session.user` is; next/cache needs a request, so it's stubbed.
@@ -79,6 +79,9 @@ const ALREADY_IN = "They're already in this group.";
 const USED_LINK = "This link was already used or has been reset.";
 const ARCHIVED = "This group is archived.";
 const archive = () => db.group.update({ where: { id: g.id }, data: { archivedAt: new Date() } });
+/** An expense of ₹333.33 that `payer` paid and `owes` owes in full, in the group `g`. */
+const debt = (owes: GroupMember, payer: GroupMember) =>
+  createExpenseRow(g.id, { createdByMemberId: payer.id, payers: [[payer.id, 33333n]], shares: [[owes.id, 33333n]] });
 
 /** A signed-up user who is an active member of `g` with `role`. */
 async function memberWith(role: "ADMIN" | "MEMBER", overrides: Partial<User> = {}) {
@@ -695,6 +698,17 @@ describe("removeMember", () => {
     await expect(removeMember(asha.id, "nope")).rejects.toBeInstanceOf(ForbiddenError);
   });
 
+  it("refuses to remove someone who still owes or is owed, naming them and the amount", async () => {
+    const rahul = await placeholder(asha.id, g.id, { displayName: "Rahul" });
+    await debt(rahul, await ownerRow());
+    await expect(removeMember(asha.id, rahul.id)).rejects.toThrow("Rahul still owes ₹333.33. Settle up before removing them.");
+    const priya = await placeholder(asha.id, g.id, { displayName: "Priya" });
+    await debt(await ownerRow(), priya);
+    await expect(removeMember(asha.id, priya.id)).rejects.toThrow("Priya is still owed ₹333.33. Settle up before removing them.");
+    expect((await memberRow(rahul.id)).leftAt).toBeNull();
+    expect((await memberRow(priya.id)).leftAt).toBeNull();
+  });
+
   it("refuses someone who has already left", async () => {
     const { member } = await memberWith("MEMBER");
     await removeMember(asha.id, member.id);
@@ -839,6 +853,19 @@ describe("leaveGroup", () => {
   it("forbids an outsider", async () => {
     const stranger = await createUser();
     await expect(leaveGroup(stranger.id, g.id)).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("refuses to let someone leave with a balance, and lets them once it's settled", async () => {
+    const { user: ravi, member } = await memberWith("MEMBER");
+    const owner = await ownerRow();
+    await debt(member, owner);
+    await expect(leaveGroup(ravi.id, g.id)).rejects.toThrow("Settle up before leaving: you owe ₹333.33.");
+    await createSettlementRow(g.id, { fromMemberId: member.id, toMemberId: owner.id, amount: 66666n, createdByMemberId: member.id });
+    await expect(leaveGroup(ravi.id, g.id)).rejects.toThrow("Settle up before leaving: you're owed ₹333.33.");
+    expect((await memberRow(member.id)).leftAt).toBeNull();
+    await debt(member, owner);
+    await leaveGroup(ravi.id, g.id);
+    expect((await memberRow(member.id)).leftAt).not.toBeNull();
   });
 });
 
