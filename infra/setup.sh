@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Idempotent GCP + GitHub provisioning for Hisaab. Every step checks first and skips what exists.
-# Usage: BILLING_ACCOUNT=XXXXXX-XXXXXX-XXXXXX bash infra/setup.sh
+# Usage: bash infra/setup.sh (the project must already exist with billing enabled)
 # PROJECT_ID is a shared umbrella project for personal apps, so every resource here is hisaab-prefixed
 # and the WIF pool trusts the whole GitHub owner; each app binds its own repo to its own deployer SA.
 # Never changes gcloud's global config: every gcloud call passes --project explicitly.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${BILLING_ACCOUNT:?BILLING_ACCOUNT must be set}"
 # shellcheck source=config.env
 source infra/config.env
 
@@ -23,13 +22,13 @@ step() { echo "$1: creating"; }
 # IAM is eventually consistent: a just-created service account can briefly be "not found".
 retry() { for i in 1 2 3 4 5 6; do "$@" && return; echo "retrying in 10s ($i)"; sleep 10; done; return 1; }
 
-# --- Project + billing
-if gcloud projects describe "$PROJECT_ID" "${P[@]}" >/dev/null 2>&1; then skip "project $PROJECT_ID"
-else step "project $PROJECT_ID"; gcloud projects create "$PROJECT_ID" "${P[@]}"; fi
-
-if [[ $(gcloud billing projects describe "$PROJECT_ID" "${P[@]}" --format='value(billingAccountName)') == "billingAccounts/$BILLING_ACCOUNT" ]]; then
-  skip "billing link"
-else step "billing link"; gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT" "${P[@]}"; fi
+# --- Preflight (read-only). The project is shared by other apps: never create it or change its billing.
+die() { echo "ERROR: $*" >&2; exit 1; }
+gcloud projects describe "$PROJECT_ID" "${P[@]}" >/dev/null 2>&1 ||
+  die "project $PROJECT_ID not found or not accessible; create it in the console first"
+[[ $(gcloud billing projects describe "$PROJECT_ID" "${P[@]}" --format='value(billingEnabled)') == True ]] ||
+  die "billing is not enabled on $PROJECT_ID; link billing in the console first"
+echo "preflight: project $PROJECT_ID exists, billing enabled"
 
 # --- APIs
 enabled=$(gcloud services list --enabled "${P[@]}" --format='value(config.name)')
