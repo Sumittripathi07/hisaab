@@ -14,6 +14,8 @@ jobs:
     env:
       # Dummy value: prisma generate (postinstall) and next build load config but never connect.
       DATABASE_URL: postgresql://build:build@localhost:5432/build
+      # Dummy value: next build loads env.ts but sends nothing.
+      SMTP_URL: file:///tmp/outbox
     services:
       postgres:
         image: postgres:16

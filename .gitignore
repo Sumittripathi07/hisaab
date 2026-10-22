@@ -33,6 +33,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# email outboxes (SMTP_URL=file://<dir>)
+.dev-outbox/
+.test-outbox/
+.e2e-outbox/
+
 # env files (only .env.example is committed)
 .env*
 !.env.example

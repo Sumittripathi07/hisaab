@@ -6,3 +6,16 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+/// One row per email sent (or attempted). Rate limits count these rows.
+model EmailLog {
+  id           String   @id @default(cuid())
+  kind         String
+  toEmail      String
+  senderUserId String?
+  createdAt    DateTime @default(now())
+
+  @@index([kind, toEmail, createdAt])
+  @@index([kind, senderUserId, createdAt])
+  @@index([createdAt])
+}

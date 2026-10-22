@@ -7,13 +7,15 @@ RUN corepack enable
 RUN apt-get update -y && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 # Dummy value so `prisma generate` (postinstall) and prisma.config.ts load. Nothing connects at build.
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
+# Dummy value so `next build` can load env.ts. Nothing is sent at build.
+ENV SMTP_URL=file:///tmp/outbox
 # The schema is needed here because postinstall runs `prisma generate`.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml prisma.config.ts ./
 COPY prisma ./prisma
 RUN pnpm install --frozen-lockfile
 
 FROM deps AS builder
-# Dummy build-time env goes here (DATABASE_URL is inherited from deps). Later tasks add more.
+# Dummy build-time env goes here (DATABASE_URL and SMTP_URL are inherited from deps). Later tasks add more.
 COPY . .
 RUN pnpm build
 
