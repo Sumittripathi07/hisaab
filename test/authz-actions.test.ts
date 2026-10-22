@@ -2,6 +2,8 @@ import { readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
+import type { ExpenseFormValues } from "@/lib/validation";
+import * as expenseActions from "@/server/actions/expenses";
 import * as groupActions from "@/server/actions/groups";
 import * as memberActions from "@/server/actions/members";
 import * as profileActions from "@/server/actions/profile";
@@ -9,7 +11,7 @@ import type { ActionResult } from "@/server/action";
 import type { SessionUser } from "@/server/session";
 import type { User } from "@/generated/prisma/client";
 import { resetDb } from "./db";
-import { addMember, createGroup, createUser } from "./factories";
+import { addMember, createExpenseRow, createGroup, createUser } from "./factories";
 import { clearOutbox, readOutbox } from "./outbox";
 
 // The spec's authz check: someone outside a group gets "no access" from every server action, and nothing changes.
@@ -18,7 +20,7 @@ const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
 vi.mock("@/server/session", () => ({ requireUser: async () => session.user }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const actions = { ...groupActions, ...memberActions, ...profileActions };
+const actions = { ...expenseActions, ...groupActions, ...memberActions, ...profileActions };
 type ActionName = keyof typeof actions;
 
 const FORBIDDEN = { ok: false, error: "You don't have access to this group." };
@@ -29,11 +31,21 @@ const BAD_CLAIM = { ok: false, error: "This link was already used or has been re
 const OWN = expect.objectContaining({ ok: true });
 
 /** The group under attack: an owner, an admin, a member and a placeholder with a live claim link. */
-type Target = { groupId: string; inviteCode: string; memberIds: string[] };
+type Target = { groupId: string; inviteCode: string; memberIds: string[]; expenseId: string };
 type Row = { expected: unknown; calls: (t: Target) => (() => Promise<ActionResult<unknown>>)[] };
 const once = (run: () => Promise<ActionResult<unknown>>) => [run];
 /** One call per member of the group, so no row is spared. */
 const perMember = (t: Target, run: (memberId: string) => Promise<ActionResult<unknown>>) => t.memberIds.map((id) => () => run(id));
+
+const expenseForm = (memberIds: string[]): ExpenseFormValues => ({
+  description: "Taken over",
+  amount: "300",
+  category: "other",
+  date: "2026-01-15",
+  notes: "",
+  payers: [{ memberId: memberIds[0], value: "300" }],
+  split: { method: "EQUAL", memberIds },
+});
 
 const table: Record<ActionName, Row> = {
   createGroupAction: { expected: OWN, calls: () => once(() => actions.createGroupAction({ name: "Mine", type: "OTHER", baseCurrency: "INR" })) },
@@ -66,6 +78,18 @@ const table: Record<ActionName, Row> = {
   },
   leaveGroupAction: { expected: FORBIDDEN, calls: ({ groupId }) => once(() => actions.leaveGroupAction({ groupId })) },
 
+  // A valid expense among the group's own members, so only membership can refuse it.
+  createExpenseAction: {
+    expected: FORBIDDEN,
+    calls: ({ groupId, memberIds }) => once(() => actions.createExpenseAction({ groupId, ...expenseForm(memberIds) })),
+  },
+  updateExpenseAction: {
+    expected: FORBIDDEN,
+    calls: ({ expenseId, memberIds }) => once(() => actions.updateExpenseAction({ expenseId, version: 1, ...expenseForm(memberIds) })),
+  },
+  deleteExpenseAction: { expected: FORBIDDEN, calls: ({ expenseId }) => once(() => actions.deleteExpenseAction({ expenseId })) },
+  restoreExpenseAction: { expected: FORBIDDEN, calls: ({ expenseId }) => once(() => actions.restoreExpenseAction({ expenseId })) },
+
   // Under their current name: a new one would rightly follow them onto their own old row in a group they left. A save
   // that reached anyone else's row would still show, as "Mallory" in place of their name.
   completeOnboardingAction: {
@@ -92,7 +116,9 @@ beforeEach(async () => {
     await addMember(g.id, { displayName: "Rahul", email: "rahul@example.test", claimToken: "live-claim-token" }),
   ];
   const ownerRow = await db.groupMember.findUniqueOrThrow({ where: { groupId_userId: { groupId: g.id, userId: owner.id } } });
-  target = { groupId: g.id, inviteCode: g.inviteCode, memberIds: [ownerRow.id, ...rows.map((r) => r.id)] };
+  const memberIds = [ownerRow.id, ...rows.map((r) => r.id)];
+  const expense = await createExpenseRow(g.id, { createdByMemberId: ownerRow.id, payers: [[ownerRow.id, 300n]], shares: memberIds.map((id) => [id, 75n]) });
+  target = { groupId: g.id, inviteCode: g.inviteCode, memberIds, expenseId: expense.id };
 
   // The outsider owns a group of their own, so a role there must not count here.
   outsider = await createUser({ name: "Mallory" });
@@ -100,10 +126,14 @@ beforeEach(async () => {
   session.user = { ...outsider, defaultCurrency: outsider.defaultCurrency, upiId: outsider.upiId, image: outsider.image };
 });
 
-/** Everything an outsider could touch: the group, its members, everyone else's account, and email. */
+/** Everything an outsider could touch: the group, its members and money, everyone else's account, and email. */
 const snapshot = async () => ({
   group: await db.group.findUniqueOrThrow({ where: { id: target.groupId } }),
   members: await db.groupMember.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
+  expenses: await db.expense.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
+  payers: await db.expensePayer.findMany({ where: { expense: { groupId: target.groupId } }, orderBy: { id: "asc" } }),
+  shares: await db.expenseShare.findMany({ where: { expense: { groupId: target.groupId } }, orderBy: { id: "asc" } }),
+  activity: await db.activity.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
   users: await db.user.findMany({ where: { id: { not: outsider.id } }, orderBy: { id: "asc" } }),
   emails: await readOutbox(),
 });
@@ -111,6 +141,7 @@ const snapshot = async () => ({
 it("has a row for every exported action, in every actions file", () => {
   // A new file of actions must be imported above, and each new action needs a row in the table.
   expect(readdirSync(fileURLToPath(new URL("../src/server/actions", import.meta.url))).sort()).toEqual([
+    "expenses.ts",
     "groups.ts",
     "members.ts",
     "profile.ts",

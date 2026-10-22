@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   currencySchema,
   displayNameSchema,
+  expenseInputSchema,
   GROUP_COLORS,
   groupInputSchema,
+  isoDateSchema,
   placeholderSchema,
   profileSchema,
   signUpName,
@@ -116,5 +118,71 @@ describe("placeholderSchema", () => {
   it("rejects a malformed email and a blank name", () => {
     expect(() => placeholderSchema.parse({ displayName: "Rahul", email: "rahul" })).toThrow();
     expect(() => placeholderSchema.parse({ displayName: "  " })).toThrow();
+  });
+});
+
+describe("expenseInputSchema", () => {
+  const valid = {
+    groupId: "g1",
+    description: " Dinner ",
+    amount: "100000",
+    category: "food",
+    date: "2026-10-23",
+    notes: "",
+    payers: [{ memberId: "a", value: "100000" }],
+    split: { method: "EQUAL", memberIds: ["a", "b"] },
+  };
+  const error = (input: object) => expenseInputSchema.safeParse({ ...valid, ...input }).error?.issues[0].message;
+
+  it("parses money to bigint minor units, trims, and turns empty notes into null", () =>
+    expect(expenseInputSchema.parse(valid)).toEqual({
+      ...valid,
+      description: "Dinner",
+      amount: 100000n,
+      notes: null,
+      payers: [{ memberId: "a", value: 100000n }],
+      split: { method: "EQUAL", memberIds: ["a", "b"], adjustments: [] },
+    }));
+  it("refuses a zero amount", () => expect(error({ amount: "0" })).toBe("Enter an amount above zero"));
+  it("refuses more than 11 digits, and decimals (minor units only)", () => {
+    expect(error({ amount: "123456789012" })).toBeDefined();
+    expect(error({ amount: "1.5" })).toBeDefined();
+    expect(expenseInputSchema.parse({ ...valid, amount: "99999999999", payers: [{ memberId: "a", value: "99999999999" }] }).amount).toBe(
+      99_999_999_999n,
+    );
+  });
+  it("refuses someone twice in one list", () => {
+    expect(error({ split: { method: "EQUAL", memberIds: ["a", "a"] } })).toBe("Each person can only appear once");
+    expect(error({ payers: [{ memberId: "a", value: "50000" }, { memberId: "a", value: "50000" }] })).toBe("Each person can only appear once");
+    const item = { name: "Pizza", amount: "500", memberIds: ["a", "a"] };
+    expect(error({ split: { method: "ITEMIZED", items: [item] } })).toBe("Each person can only appear once");
+  });
+  it("refuses an empty split and no payers", () => {
+    expect(error({ split: { method: "EQUAL", memberIds: [] } })).toBeDefined();
+    expect(error({ payers: [] })).toBe("Choose who paid");
+  });
+  it("refuses a percentage over 100", () =>
+    expect(error({ split: { method: "PERCENT", basisPoints: [{ memberId: "a", value: "10001" }] } })).toBeDefined());
+  it("makes negative shares, percents, amounts and zero-cost items unrepresentable", () => {
+    const one = (value: string) => [{ memberId: "a", value }];
+    expect(error({ split: { method: "EXACT", amounts: one("-5") } })).toBeDefined();
+    expect(error({ split: { method: "PERCENT", basisPoints: one("-5") } })).toBeDefined();
+    expect(error({ split: { method: "SHARES", shares: one("-1") } })).toBeDefined();
+    expect(error({ split: { method: "SHARES", shares: one("1000") } })).toBeDefined();
+    expect(error({ split: { method: "ITEMIZED", items: [{ name: "Tip", amount: "0", memberIds: ["a"] }] } })).toBe("Enter an amount above zero");
+  });
+  it("lets adjustments go below zero", () =>
+    expect(expenseInputSchema.parse({ ...valid, split: { ...valid.split, adjustments: [{ memberId: "a", value: "-500" }] } }).split.adjustments).toEqual([
+      { memberId: "a", value: -500n },
+    ]));
+  it("refuses an unknown category and an over-long description", () => {
+    expect(error({ category: "bribes" })).toBeDefined();
+    expect(error({ description: "x".repeat(101) })).toBe("Description must be 100 characters or fewer");
+    expect(error({ description: "  " })).toBe("Add a description");
+  });
+  it("refuses impossible calendar dates", () => {
+    expect(isoDateSchema.safeParse("2026-02-30").success).toBe(false);
+    expect(isoDateSchema.safeParse("2026-02-29").success).toBe(false);
+    expect(isoDateSchema.safeParse("2028-02-29").success).toBe(true);
   });
 });
