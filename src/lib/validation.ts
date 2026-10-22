@@ -151,3 +151,23 @@ export const expenseInputSchema = z.object({
 export type ExpenseInput = z.output<typeof expenseInputSchema>;
 /** What the expense form holds: every amount still a string. */
 export type ExpenseFormValues = Omit<z.input<typeof expenseInputSchema>, "groupId">;
+
+const settlementFields = {
+  amount: positiveMinorSchema,
+  method: z.enum(["UPI", "CASH", "BANK", "OTHER"]),
+  date: isoDateSchema,
+  note: z
+    .string()
+    .trim()
+    .max(200, "Note must be 200 characters or fewer")
+    .transform((note) => note || null),
+};
+
+export const settlementInputSchema = z
+  .object({ groupId: id, fromMemberId: id, toMemberId: id, ...settlementFields })
+  .refine((s) => s.fromMemberId !== s.toMemberId, { message: "Choose two different people.", path: ["toMemberId"] });
+
+export type SettlementInput = z.output<typeof settlementInputSchema>;
+
+/** Who paid whom is fixed once recorded; a payment between the wrong people is deleted and recorded again. */
+export const settlementUpdateSchema = z.object({ settlementId: id, ...settlementFields });

@@ -7,11 +7,12 @@ import * as expenseActions from "@/server/actions/expenses";
 import * as groupActions from "@/server/actions/groups";
 import * as memberActions from "@/server/actions/members";
 import * as profileActions from "@/server/actions/profile";
+import * as settlementActions from "@/server/actions/settlements";
 import type { ActionResult } from "@/server/action";
 import type { SessionUser } from "@/server/session";
 import type { User } from "@/generated/prisma/client";
 import { resetDb } from "./db";
-import { addMember, createExpenseRow, createGroup, createUser } from "./factories";
+import { addMember, createExpenseRow, createGroup, createSettlementRow, createUser } from "./factories";
 import { clearOutbox, readOutbox } from "./outbox";
 
 // The spec's authz check: someone outside a group gets "no access" from every server action, and nothing changes.
@@ -20,7 +21,7 @@ const session = vi.hoisted(() => ({ user: null as SessionUser | null }));
 vi.mock("@/server/session", () => ({ requireUser: async () => session.user }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-const actions = { ...expenseActions, ...groupActions, ...memberActions, ...profileActions };
+const actions = { ...expenseActions, ...groupActions, ...memberActions, ...profileActions, ...settlementActions };
 type ActionName = keyof typeof actions;
 
 const FORBIDDEN = { ok: false, error: "You don't have access to this group." };
@@ -31,7 +32,7 @@ const BAD_CLAIM = { ok: false, error: "This link was already used or has been re
 const OWN = expect.objectContaining({ ok: true });
 
 /** The group under attack: an owner, an admin, a member and a placeholder with a live claim link. */
-type Target = { groupId: string; inviteCode: string; memberIds: string[]; expenseId: string };
+type Target = { groupId: string; inviteCode: string; memberIds: string[]; expenseId: string; settlementId: string };
 type Row = { expected: unknown; calls: (t: Target) => (() => Promise<ActionResult<unknown>>)[] };
 const once = (run: () => Promise<ActionResult<unknown>>) => [run];
 /** One call per member of the group, so no row is spared. */
@@ -90,6 +91,31 @@ const table: Record<ActionName, Row> = {
   deleteExpenseAction: { expected: FORBIDDEN, calls: ({ expenseId }) => once(() => actions.deleteExpenseAction({ expenseId })) },
   restoreExpenseAction: { expected: FORBIDDEN, calls: ({ expenseId }) => once(() => actions.restoreExpenseAction({ expenseId })) },
 
+  // A valid payment between the group's own members, so only membership can refuse it.
+  recordSettlementAction: {
+    expected: FORBIDDEN,
+    calls: ({ groupId, memberIds }) =>
+      once(() =>
+        actions.recordSettlementAction({
+          groupId,
+          fromMemberId: memberIds[2],
+          toMemberId: memberIds[0],
+          amount: "300",
+          method: "UPI",
+          date: "2026-01-15",
+          note: "",
+        }),
+      ),
+  },
+  updateSettlementAction: {
+    expected: FORBIDDEN,
+    calls: ({ settlementId }) =>
+      once(() => actions.updateSettlementAction({ settlementId, amount: "1", method: "CASH", date: "2026-01-15", note: "Taken over" })),
+  },
+  deleteSettlementAction: { expected: FORBIDDEN, calls: ({ settlementId }) => once(() => actions.deleteSettlementAction({ settlementId })) },
+  restoreSettlementAction: { expected: FORBIDDEN, calls: ({ settlementId }) => once(() => actions.restoreSettlementAction({ settlementId })) },
+  disputeSettlementAction: { expected: FORBIDDEN, calls: ({ settlementId }) => once(() => actions.disputeSettlementAction({ settlementId })) },
+
   // Under their current name: a new one would rightly follow them onto their own old row in a group they left. A save
   // that reached anyone else's row would still show, as "Mallory" in place of their name.
   completeOnboardingAction: {
@@ -118,7 +144,8 @@ beforeEach(async () => {
   const ownerRow = await db.groupMember.findUniqueOrThrow({ where: { groupId_userId: { groupId: g.id, userId: owner.id } } });
   const memberIds = [ownerRow.id, ...rows.map((r) => r.id)];
   const expense = await createExpenseRow(g.id, { createdByMemberId: ownerRow.id, payers: [[ownerRow.id, 300n]], shares: memberIds.map((id) => [id, 75n]) });
-  target = { groupId: g.id, inviteCode: g.inviteCode, memberIds, expenseId: expense.id };
+  const settlement = await createSettlementRow(g.id, { fromMemberId: memberIds[2], toMemberId: ownerRow.id, amount: 75n, createdByMemberId: ownerRow.id });
+  target = { groupId: g.id, inviteCode: g.inviteCode, memberIds, expenseId: expense.id, settlementId: settlement.id };
 
   // The outsider owns a group of their own, so a role there must not count here.
   outsider = await createUser({ name: "Mallory" });
@@ -133,6 +160,7 @@ const snapshot = async () => ({
   expenses: await db.expense.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
   payers: await db.expensePayer.findMany({ where: { expense: { groupId: target.groupId } }, orderBy: { id: "asc" } }),
   shares: await db.expenseShare.findMany({ where: { expense: { groupId: target.groupId } }, orderBy: { id: "asc" } }),
+  settlements: await db.settlement.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
   activity: await db.activity.findMany({ where: { groupId: target.groupId }, orderBy: { id: "asc" } }),
   users: await db.user.findMany({ where: { id: { not: outsider.id } }, orderBy: { id: "asc" } }),
   emails: await readOutbox(),
@@ -145,6 +173,7 @@ it("has a row for every exported action, in every actions file", () => {
     "groups.ts",
     "members.ts",
     "profile.ts",
+    "settlements.ts",
   ]);
   expect(Object.keys(table).sort()).toEqual(Object.keys(actions).sort());
 });
