@@ -51,7 +51,8 @@ export const CATEGORIES = {
 export type Category = keyof typeof CATEGORIES;
 export const CATEGORY_KEYS = Object.keys(CATEGORIES) as [Category, ...Category[]];
 
-const normalise = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
+/** Lowercase, trimmed, runs of spaces collapsed: what makes two descriptions "the same". */
+export const normalise = (text: string) => text.trim().toLowerCase().replace(/\s+/g, " ");
 
 /**
  * A category for `description`: what the group last used for the same description (`past` newest first), else the first

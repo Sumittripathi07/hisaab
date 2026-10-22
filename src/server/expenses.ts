@@ -1,16 +1,16 @@
 import { isDeepStrictEqual } from "node:util";
 import type { z } from "zod";
 import type { ExpenseChange, ExpenseSnapshot } from "@/lib/activity";
-import { CATEGORIES, type Category } from "@/lib/categories";
-import { formatDay, fromDbDate, toDbDate } from "@/lib/dates";
+import { CATEGORIES, normalise, type Category } from "@/lib/categories";
+import { formatDay, fromDbDate, toDbDate, todayIn } from "@/lib/dates";
 import { db } from "@/lib/db";
 import { formatMoney } from "@/lib/money/format";
 import { checkPayers, splitExpense, type Part } from "@/lib/money/split";
-import type { ExpenseInput, splitSpecSchema } from "@/lib/validation";
-import type { Expense, ExpensePayer, GroupMember, Prisma } from "@/generated/prisma/client";
+import { isoDateSchema, type ExpenseInput, type splitSpecSchema } from "@/lib/validation";
+import type { Expense, ExpensePayer, GroupMember, Prisma, SplitMethod } from "@/generated/prisma/client";
 import { recordActivity } from "./activity";
 import { requireMember, requireMemberFor } from "./authz";
-import { ConflictError, UserError } from "./errors";
+import { ConflictError, NotFoundError, UserError } from "./errors";
 
 type ExpenseFields = Omit<ExpenseInput, "groupId">;
 type Split = ExpenseInput["split"];
@@ -240,3 +240,195 @@ async function setDeleted(userId: string, expenseId: string, deleted: boolean): 
 
 export const deleteExpense = (userId: string, expenseId: string): Promise<void> => setDeleted(userId, expenseId, true);
 export const restoreExpense = (userId: string, expenseId: string): Promise<void> => setDeleted(userId, expenseId, false);
+
+export type ExpenseFilters = { q?: string; memberId?: string; category?: Category; from?: string; to?: string };
+
+export type ExpenseListItem = {
+  id: string;
+  description: string;
+  category: Category;
+  date: string;
+  amount: bigint;
+  currency: string;
+  payerLabel: string;
+  /** What the viewer paid minus their share: positive means they lent, negative means they owe. */
+  myNet: bigint;
+  commentCount: number;
+};
+
+const payerLabel = (payers: { memberId: string; member: { displayName: string } }[], me: string) => {
+  const [only, ...others] = payers;
+  if (!only || others.length) return `${payers.length} people paid`;
+  return only.memberId === me ? "You paid" : `${only.member.displayName} paid`;
+};
+
+/** A date filter that isn't a real "YYYY-MM-DD" (a hand-edited URL) is ignored rather than failing the page. */
+const day = (value?: string) => (value && isoDateSchema.safeParse(value).success ? toDbDate(value) : undefined);
+
+export async function listExpenses(
+  userId: string,
+  groupId: string,
+  filters: ExpenseFilters,
+  limit = 50,
+): Promise<{ items: ExpenseListItem[]; hasMore: boolean }> {
+  const { member } = await requireMember(userId, groupId);
+  const take = Math.min(500, Math.max(1, Math.trunc(limit) || 1));
+  const q = filters.q?.trim();
+  // strpos is a plain substring match (no LIKE), so %, _ and \ in the search mean themselves.
+  const matches = q
+    ? await db.$queryRaw<{ id: string }[]>`
+        SELECT id FROM "Expense"
+        WHERE "groupId" = ${groupId} AND "deletedAt" IS NULL
+          AND (strpos(lower(description), lower(${q})) > 0
+               OR strpos(lower(coalesce(notes, '')), lower(${q})) > 0)`
+    : null;
+  const { memberId } = filters;
+  const rows = await db.expense.findMany({
+    where: {
+      groupId,
+      deletedAt: null,
+      id: matches ? { in: matches.map((m) => m.id) } : undefined,
+      category: filters.category,
+      OR: memberId ? [{ payers: { some: { memberId } } }, { shares: { some: { memberId } } }] : undefined,
+      date: { gte: day(filters.from), lte: day(filters.to) },
+    },
+    orderBy: [{ date: "desc" }, { createdAt: "desc" }, { id: "desc" }],
+    take: take + 1,
+    include: {
+      payers: { select: { memberId: true, amount: true, member: { select: { displayName: true } } } },
+      shares: { where: { memberId: member.id }, select: { amount: true } },
+      _count: { select: { comments: { where: { deletedAt: null } } } },
+    },
+  });
+  const items = rows.slice(0, take).map((e) => ({
+    id: e.id,
+    description: e.description,
+    category: e.category as Category,
+    date: fromDbDate(e.date),
+    amount: e.amount,
+    currency: e.currency,
+    payerLabel: payerLabel(e.payers, member.id),
+    myNet: (e.payers.find((p) => p.memberId === member.id)?.amount ?? 0n) - (e.shares[0]?.amount ?? 0n),
+    commentCount: e._count.comments,
+  }));
+  return { items, hasMore: rows.length > take };
+}
+
+type Person = { memberId: string; displayName: string; amount: bigint };
+
+export type ExpenseDetail = {
+  expense: {
+    id: string;
+    groupId: string;
+    description: string;
+    category: Category;
+    notes: string | null;
+    date: string;
+    amount: bigint;
+    currency: string;
+    splitMethod: SplitMethod;
+    version: number;
+    createdAt: Date;
+    /** Display name of the member who added it. */
+    createdBy: string;
+  };
+  /** The split as entered, for prefilling an edit. */
+  split: z.input<typeof splitSpecSchema>;
+  payers: Person[];
+  shares: Person[];
+  canEdit: boolean;
+};
+
+export async function getExpense(userId: string, expenseId: string): Promise<ExpenseDetail> {
+  const { member, group, row } = await requireMemberFor(userId, "expense", expenseId);
+  if (row.deletedAt) throw new NotFoundError(DELETED);
+  const people = { select: { memberId: true, amount: true, member: { select: { displayName: true } } } } as const;
+  const inJoinOrder = [{ member: { createdAt: "asc" } }, { memberId: "asc" }] as const;
+  const e = await db.expense.findUniqueOrThrow({
+    where: { id: expenseId },
+    include: {
+      createdBy: { select: { displayName: true } },
+      payers: { ...people, orderBy: [...inJoinOrder] },
+      shares: { ...people, orderBy: [...inJoinOrder] },
+    },
+  });
+  const named = (list: typeof e.payers): Person[] => list.map((p) => ({ memberId: p.memberId, displayName: p.member.displayName, amount: p.amount }));
+  return {
+    expense: {
+      id: e.id,
+      groupId: e.groupId,
+      description: e.description,
+      category: e.category as Category,
+      notes: e.notes,
+      date: fromDbDate(e.date),
+      amount: e.amount,
+      currency: e.currency,
+      splitMethod: e.splitMethod,
+      version: e.version,
+      createdAt: e.createdAt,
+      createdBy: e.createdBy.displayName,
+    },
+    split: e.splitInput as z.input<typeof splitSpecSchema>,
+    payers: named(e.payers),
+    shares: named(e.shares),
+    canEdit: canChange(member, row) && !group.archivedAt,
+  };
+}
+
+export type FormMember = { id: string; displayName: string; image: string | null; isPlaceholder: boolean; active: boolean };
+
+export type ExpenseFormData = {
+  groupId: string;
+  groupName: string;
+  currency: string;
+  today: string;
+  /** The viewer's member id. */
+  me: string;
+  members: FormMember[];
+  /** Past descriptions with the category the group gave them, newest first, for suggesting a category. */
+  history: { description: string; category: string }[];
+};
+
+const HISTORY_SIZE = 200;
+// ponytail: looks at the 1,000 newest expenses, so a group with more than that and few repeats offers fewer than 200.
+const HISTORY_SCAN = 1000;
+
+/** What the add/edit form needs. With `expenseId`, people who have left but are on that expense stay in the list. */
+export async function getExpenseFormData(userId: string, groupId: string, expenseId?: string): Promise<ExpenseFormData> {
+  const { member, group } = await requireMember(userId, groupId);
+  const [user, members, past] = await Promise.all([
+    db.user.findUniqueOrThrow({ where: { id: userId }, select: { timezone: true } }),
+    db.groupMember.findMany({
+      // Scoped to this group, so an expense id from another group adds nobody.
+      where: {
+        groupId,
+        OR: [{ leftAt: null }, ...(expenseId ? [{ expensePayments: { some: { expenseId } } }, { expenseShares: { some: { expenseId } } }] : [])],
+      },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      include: { user: { select: { image: true } } },
+    }),
+    db.expense.findMany({
+      where: { groupId, deletedAt: null },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: HISTORY_SCAN,
+      select: { description: true, category: true },
+    }),
+  ]);
+  const latest = new Map<string, { description: string; category: string }>();
+  for (const entry of past) if (!latest.has(normalise(entry.description))) latest.set(normalise(entry.description), entry);
+  return {
+    groupId,
+    groupName: group.name,
+    currency: group.baseCurrency,
+    today: todayIn(user.timezone),
+    me: member.id,
+    members: members.map((m) => ({
+      id: m.id,
+      displayName: m.displayName,
+      image: m.user?.image ?? null,
+      isPlaceholder: m.userId === null,
+      active: m.leftAt === null,
+    })),
+    history: [...latest.values()].slice(0, HISTORY_SIZE),
+  };
+}
