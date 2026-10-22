@@ -17,8 +17,11 @@ import { requireOnboardedUser } from "@/server/session";
 
 export const metadata: Metadata = { title: "Group settings · Hisaab" };
 
-/** For members, people who left, and groups that don't exist alike, so it never says which. */
-function NoAccess({ groupId }: { groupId: string }) {
+/**
+ * For members, people who left, and groups that don't exist alike, so it never says which. The way out is the dashboard,
+ * not the group, which an outsider can't open.
+ */
+function NoAccess() {
   return (
     <div className="mx-auto flex max-w-sm flex-col items-center py-16 text-center">
       <span aria-hidden className="flex size-14 items-center justify-center rounded-2xl bg-muted text-muted-foreground">
@@ -26,8 +29,8 @@ function NoAccess({ groupId }: { groupId: string }) {
       </span>
       <h1 className="mt-4 text-2xl font-semibold tracking-tight">You don&apos;t have access</h1>
       <p className="mt-2 text-balance text-muted-foreground">Only the group&apos;s owner and admins can change its settings.</p>
-      <Link href={`/groups/${groupId}`} className={cn(buttonVariants({ variant: "outline" }), "mt-6 h-11 rounded-xl px-4")}>
-        Back to the group
+      <Link href="/dashboard" className={cn(buttonVariants({ variant: "outline" }), "mt-6 h-11 rounded-xl px-4")}>
+        Go to dashboard
       </Link>
     </div>
   );
@@ -43,7 +46,7 @@ export default async function GroupSettingsPage({ params }: PageProps<"/groups/[
       throw error;
     },
   );
-  if (!allowed) return <NoAccess groupId={groupId} />;
+  if (!allowed) return <NoAccess />;
 
   const { group, me, members } = await getGroupDetail(user.id, groupId);
   const archived = group.archivedAt !== null;

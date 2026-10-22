@@ -13,8 +13,8 @@ import type { ActionResult } from "@/server/action";
 
 const bigButton = "h-12 w-full rounded-xl text-base";
 
-/** The page around a join or claim card: centred, with the brand above it. */
-function Shell({ children }: { children: React.ReactNode }) {
+/** A page with one centred card and the brand above it: join and claim links, and the 404 page. */
+export function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="flex min-h-dvh flex-col items-center justify-center bg-[radial-gradient(70%_45%_at_50%_0%,color-mix(in_oklch,var(--color-emerald-500)_14%,transparent),transparent)] px-4 py-10">
       <p className="mb-6 text-2xl font-semibold tracking-tight">
