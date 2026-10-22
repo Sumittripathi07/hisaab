@@ -171,3 +171,9 @@ export type SettlementInput = z.output<typeof settlementInputSchema>;
 
 /** Who paid whom is fixed once recorded; a payment between the wrong people is deleted and recorded again. */
 export const settlementUpdateSchema = z.object({ settlementId: id, ...settlementFields });
+
+/** The group isn't named: the target says which group it is in, so the caller can't point at a different one. */
+export const commentInputSchema = z.object({
+  target: z.discriminatedUnion("kind", [z.object({ kind: z.literal("expense"), id }), z.object({ kind: z.literal("settlement"), id })]),
+  body: z.string().trim().min(1, "Write a comment").max(1000, "Comments must be 1,000 characters or fewer"),
+});
