@@ -1,6 +1,13 @@
 import { expect, test, type Page } from "@playwright/test";
-import { lastEmailTo } from "../test/outbox";
-import { completeOnboardingUi, createGroupViaUi, signedInPage, signInAndOnboard, signInWithMagicLink } from "./helpers";
+import { lastEmailTo, readOutbox } from "../test/outbox";
+import {
+  completeOnboardingUi,
+  createGroupViaUi,
+  signedInPage,
+  signInAndOnboard,
+  signInWithMagicLink,
+  useUpInviteLimit,
+} from "./helpers";
 
 test("the root sends a signed-out visitor to sign-in", async ({ page }) => {
   await page.goto("/");
@@ -170,4 +177,27 @@ test("the owner runs the group from its settings", async ({ browser }) => {
   // The owner can't leave, and is told how to.
   await expect(a.getByRole("button", { name: "Leave group" })).toHaveCount(0);
   await expect(a.getByText("Make someone else the owner")).toBeVisible();
+});
+
+test("an invite email held back by the limit still adds the person, and says so", async ({ browser }) => {
+  // Ravi sends no other invites in this run, so using up his allowance doesn't touch the other tests.
+  const r = await signedInPage(browser, "ravi@example.test", "Ravi");
+  await createGroupViaUi(r, "Book club");
+  useUpInviteLimit("ravi@example.test");
+  await r.getByRole("button", { name: "Invite people" }).click();
+  const byEmail = r.getByRole("form", { name: "Invite by email" });
+  await byEmail.getByLabel("Name").fill("Kiran");
+  await byEmail.getByLabel("Email").fill("kiran@example.test");
+  await byEmail.getByRole("button", { name: "Send invite" }).click();
+  await expect(r.getByText("Kiran was added")).toBeVisible();
+  await expect(byEmail.getByRole("status")).toHaveText(
+    "We couldn't send the email right now — copy their invite link from the list and share it yourself.",
+  );
+  await expect(byEmail.getByLabel("Name")).toHaveValue("");
+  expect((await readOutbox()).some((m) => m.to === "kiran@example.test")).toBe(false);
+
+  await r.keyboard.press("Escape");
+  const kiran = memberRow(r, "Kiran");
+  await expect(kiran.getByText("Not joined yet")).toBeVisible();
+  await expect(kiran.getByRole("button", { name: "Copy invite link" })).toBeVisible();
 });

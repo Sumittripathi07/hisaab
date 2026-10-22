@@ -41,10 +41,15 @@ async function requireTarget(userId: string, memberId: string, opts: Parameters<
 
 /**
  * Adds someone by name, with a claim link (and an invite email when we have their address).
- * The row is written before the email goes out and stays if the send is refused, so the person is still
- * in the group and an admin can copy the link to them by hand.
+ * The row is written before the email goes out and stays whatever happens to the email, so the person is in the group
+ * and anyone in it can copy their link by hand. `emailSent`: true when the invite went out, false when an email limit
+ * refused it (not an error: the person was added), and null when no email was given. Any other send failure throws.
  */
-export async function addPlaceholder(userId: string, groupId: string, input: PlaceholderInput): Promise<GroupMember> {
+export async function addPlaceholder(
+  userId: string,
+  groupId: string,
+  input: PlaceholderInput,
+): Promise<{ member: GroupMember; emailSent: boolean | null }> {
   const { group } = await requireMember(userId, groupId, { write: true });
   const email = input.email?.toLowerCase();
   if (email) {
@@ -59,8 +64,8 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
   }
 
   const claimToken = newClaimToken();
-  const placeholder = await db.groupMember.create({ data: { groupId, displayName: input.displayName, email, claimToken } });
-  if (!email) return placeholder;
+  const member = await db.groupMember.create({ data: { groupId, displayName: input.displayName, email, claimToken } });
+  if (!email) return { member, emailSent: null };
 
   const inviter = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } });
   try {
@@ -75,10 +80,10 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
       }),
     });
   } catch (error) {
-    if (error instanceof EmailRateLimitError) throw new UserError("You've sent a lot of invites. Try again in an hour.");
+    if (error instanceof EmailRateLimitError) return { member, emailSent: false };
     throw error;
   }
-  return placeholder;
+  return { member, emailSent: true };
 }
 
 /**

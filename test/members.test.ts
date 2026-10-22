@@ -87,6 +87,9 @@ async function memberWith(role: "ADMIN" | "MEMBER", overrides: Partial<User> = {
   return { user, member };
 }
 
+/** A placeholder row, for tests about something else. */
+const placeholder = async (...args: Parameters<typeof addPlaceholder>) => (await addPlaceholder(...args)).member;
+
 const signInAs = (u: User) => {
   session.user = {
     id: u.id,
@@ -102,20 +105,22 @@ const signInAs = (u: User) => {
 
 describe("addPlaceholder", () => {
   it("adds a placeholder with a claim token, a lowercased email and no user", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "Rahul@Example.test" });
+    const { member: p, emailSent } = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "Rahul@Example.test" });
+    expect(emailSent).toBe(true);
     expect(p).toMatchObject({ groupId: g.id, userId: null, displayName: "Rahul", email: "rahul@example.test", role: "MEMBER", leftAt: null });
     expect(p.claimToken).toHaveLength(32);
   });
 
   it("gives a placeholder without an email a claim token too, and sends nothing", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const { member: p, emailSent } = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    expect(emailSent).toBeNull();
     expect(p).toMatchObject({ email: null, userId: null });
     expect(p.claimToken).toHaveLength(32);
     expect(await readOutbox()).toEqual([]);
   });
 
   it("sends an invite email with a claim link", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "Rahul@Example.test" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "Rahul@Example.test" });
     const m = await lastEmailTo("rahul@example.test");
     expect(m.subject).toBe("Asha added you to Goa Trip on Hisaab");
     expect(m.kind).toBe("invite");
@@ -125,7 +130,7 @@ describe("addPlaceholder", () => {
 
   it("lets any member add one, but not an outsider", async () => {
     const { user: ravi } = await memberWith("MEMBER");
-    await expect(addPlaceholder(ravi.id, g.id, { displayName: "Rahul" })).resolves.toMatchObject({ displayName: "Rahul" });
+    await expect(addPlaceholder(ravi.id, g.id, { displayName: "Rahul" })).resolves.toMatchObject({ member: { displayName: "Rahul" } });
     const stranger = await createUser();
     await expect(addPlaceholder(stranger.id, g.id, { displayName: "Rahul" })).rejects.toBeInstanceOf(ForbiddenError);
   });
@@ -147,7 +152,7 @@ describe("addPlaceholder", () => {
     await memberWith("MEMBER", { email: "asha@example.test" });
     await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     for (const email of ["ash_@example.test", "%@example.test", "r_hul@example.test"]) {
-      await expect(addPlaceholder(asha.id, g.id, { displayName: "New", email })).resolves.toMatchObject({ email });
+      await expect(addPlaceholder(asha.id, g.id, { displayName: "New", email })).resolves.toMatchObject({ member: { email } });
     }
   });
 
@@ -164,14 +169,22 @@ describe("addPlaceholder", () => {
     await expect(addPlaceholder(asha.id, g.id, { displayName: "Gone", email: "gone@example.test" })).resolves.toBeDefined();
   });
 
-  it("keeps the placeholder and says why when the sender hit the invite limit", async () => {
+  it("still adds the person when the sender hit the invite limit, saying the email didn't go", async () => {
     await db.emailLog.createMany({
       data: Array.from({ length: 20 }, () => ({ kind: "invite", toEmail: "someone@example.test", senderUserId: asha.id })),
     });
-    const err = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" }).catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(UserError);
-    expect(err).toHaveProperty("message", "You've sent a lot of invites. Try again in an hour.");
-    expect(await db.groupMember.findFirst({ where: { groupId: g.id, email: "rahul@example.test" } })).toMatchObject({ userId: null });
+    const { member, emailSent } = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    expect(emailSent).toBe(false);
+    expect(member).toMatchObject({ displayName: "Rahul", email: "rahul@example.test", userId: null });
+    expect(await memberRow(member.id)).toMatchObject({ leftAt: null, claimToken: member.claimToken });
+    expect(await readOutbox()).toEqual([]);
+  });
+
+  it("still adds the person when the app's daily email limit is used up", async () => {
+    await db.emailLog.createMany({ data: Array.from({ length: 450 }, () => ({ kind: "magic_link", toEmail: "someone@example.test" })) });
+    const { member, emailSent } = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    expect(emailSent).toBe(false);
+    expect(await memberRow(member.id)).toMatchObject({ userId: null, leftAt: null });
     expect(await readOutbox()).toEqual([]);
   });
 
@@ -180,7 +193,7 @@ describe("addPlaceholder", () => {
       data: Array.from({ length: 20 }, () => ({ kind: "invite", toEmail: "someone@example.test", senderUserId: asha.id })),
     });
     const { user: ravi } = await memberWith("MEMBER");
-    await expect(addPlaceholder(ravi.id, g.id, { displayName: "Rahul", email: "rahul@example.test" })).resolves.toBeDefined();
+    await expect(addPlaceholder(ravi.id, g.id, { displayName: "Rahul", email: "rahul@example.test" })).resolves.toMatchObject({ emailSent: true });
   });
 
   it("lets other send failures through as they are, still keeping the placeholder", async () => {
@@ -241,7 +254,7 @@ describe("joinByInviteCode", () => {
   });
 
   it("joining claims a placeholder invited with the same email (case-insensitive)", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     const rahul = await createUser({ email: "Rahul@Example.TEST", name: "Rahul K" });
     expect(await joinByInviteCode(rahul.id, g.inviteCode)).toEqual({ groupId: g.id });
     expect(await memberRow(p.id)).toMatchObject({ userId: rahul.id, claimToken: null, displayName: "Rahul K" });
@@ -249,7 +262,7 @@ describe("joinByInviteCode", () => {
   });
 
   it("leaves one row when joining races with itself over a placeholder", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     const rahul = await createUser({ email: "rahul@example.test", name: "Rahul K" });
     await Promise.all([joinByInviteCode(rahul.id, g.inviteCode), joinByInviteCode(rahul.id, g.inviteCode)]);
     expect(await db.groupMember.count({ where: { groupId: g.id, userId: rahul.id } })).toBe(1);
@@ -258,7 +271,7 @@ describe("joinByInviteCode", () => {
   });
 
   it("does not claim a placeholder made for a different email", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     const other = await createUser({ email: "other@example.test" });
     await joinByInviteCode(other.id, g.inviteCode);
     expect(await memberRow(p.id)).toMatchObject({ userId: null, claimToken: p.claimToken });
@@ -266,8 +279,8 @@ describe("joinByInviteCode", () => {
   });
 
   it("treats _ and % in the joiner's own email literally, so they can't take over someone else's placeholder", async () => {
-    const axb = await addPlaceholder(asha.id, g.id, { displayName: "A X B", email: "axb@example.test" });
-    const other = await addPlaceholder(asha.id, g.id, { displayName: "Other", email: "other@example.test" });
+    const axb = await placeholder(asha.id, g.id, { displayName: "A X B", email: "axb@example.test" });
+    const other = await placeholder(asha.id, g.id, { displayName: "Other", email: "other@example.test" });
     const underscore = await createUser({ email: "a_b@example.test" });
     const percent = await createUser({ email: "%@example.test" });
     for (const joiner of [underscore, percent]) {
@@ -281,7 +294,7 @@ describe("joinByInviteCode", () => {
   });
 
   it("does not claim a placeholder that was removed", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     await removeMember(asha.id, p.id);
     const rahul = await createUser({ email: "rahul@example.test" });
     await joinByInviteCode(rahul.id, g.inviteCode);
@@ -361,7 +374,7 @@ describe("claimPlaceholder", () => {
   let rahul: User;
   let p: GroupMember;
   beforeEach(async () => {
-    p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     rahul = await createUser({ email: "Rahul@Example.test", name: "Rahul K" });
   });
   const token = () => p.claimToken!;
@@ -421,7 +434,7 @@ describe("claimPlaceholder", () => {
   });
 
   it("lets anyone outside the group claim a placeholder that has no email", async () => {
-    const open = await addPlaceholder(asha.id, g.id, { displayName: "Open" });
+    const open = await placeholder(asha.id, g.id, { displayName: "Open" });
     const other = await createUser();
     await expect(claimPlaceholder(other.id, open.claimToken!)).resolves.toEqual({ groupId: g.id });
   });
@@ -441,7 +454,7 @@ describe("claimPlaceholder", () => {
   });
 
   it("can't give one person two rows when they claim two placeholders at once", async () => {
-    const second = await addPlaceholder(asha.id, g.id, { displayName: "Rahul again" });
+    const second = await placeholder(asha.id, g.id, { displayName: "Rahul again" });
     const results = await Promise.allSettled([claimPlaceholder(rahul.id, token()), claimPlaceholder(rahul.id, second.claimToken!)]);
     expect(await db.groupMember.count({ where: { groupId: g.id, userId: rahul.id } })).toBe(1);
     expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
@@ -527,7 +540,7 @@ describe("getClaimPreview", () => {
   let rahul: User;
   let p: GroupMember;
   beforeEach(async () => {
-    p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    p = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
     rahul = await createUser({ email: "Rahul@Example.test", name: "Rahul K" });
   });
 
@@ -541,10 +554,10 @@ describe("getClaimPreview", () => {
   });
 
   it("refuses what claiming refuses, with the same error, and writes nothing", async () => {
-    const reset = await addPlaceholder(asha.id, g.id, { displayName: "Reset" });
+    const reset = await placeholder(asha.id, g.id, { displayName: "Reset" });
     const oldToken = reset.claimToken!;
     await regenerateClaimToken(asha.id, reset.id);
-    const removed = await addPlaceholder(asha.id, g.id, { displayName: "Removed" });
+    const removed = await placeholder(asha.id, g.id, { displayName: "Removed" });
     await removeMember(asha.id, removed.id);
     const other = await createUser({ email: "someone.else@example.test" });
     const { user: inAlready } = await memberWith("MEMBER", { email: "RAHUL@example.test" });
@@ -579,7 +592,7 @@ describe("getClaimPreview", () => {
 
 describe("regenerateClaimToken", () => {
   it("replaces a placeholder's token, so the old link stops working", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     const fresh = await regenerateClaimToken(asha.id, p.id);
     expect(fresh).toHaveLength(32);
     expect(fresh).not.toBe(p.claimToken);
@@ -587,7 +600,7 @@ describe("regenerateClaimToken", () => {
   });
 
   it("is for admins only", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     const { user: admin } = await memberWith("ADMIN");
     const { user: ravi } = await memberWith("MEMBER");
     await expect(regenerateClaimToken(admin.id, p.id)).resolves.toHaveLength(32);
@@ -601,13 +614,13 @@ describe("regenerateClaimToken", () => {
   });
 
   it("refuses an archived group", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     await archive();
     await expect(regenerateClaimToken(asha.id, p.id)).rejects.toThrow(ARCHIVED);
   });
 
   it("forbids another group's admin, and an id that doesn't exist, the same way", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     const other = await createUser();
     await createGroup(other.id);
     await expect(regenerateClaimToken(other.id, p.id)).rejects.toBeInstanceOf(ForbiddenError);
@@ -624,7 +637,7 @@ describe("removeMember", () => {
   });
 
   it("can remove a placeholder", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     await removeMember(asha.id, p.id);
     expect((await memberRow(p.id)).leftAt).not.toBeNull();
   });
@@ -698,7 +711,7 @@ describe("setMemberRole", () => {
   });
 
   it("can't make a placeholder an admin", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     await expect(setMemberRole(asha.id, p.id, "ADMIN")).rejects.toBeInstanceOf(UserError);
     expect((await memberRow(p.id)).role).toBe("MEMBER");
   });
@@ -731,7 +744,7 @@ describe("transferOwnership", () => {
   });
 
   it("can't hand the group to a placeholder or someone who left", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     await expect(transferOwnership(asha.id, p.id)).rejects.toBeInstanceOf(UserError);
     const { member } = await memberWith("MEMBER");
     await removeMember(asha.id, member.id);
@@ -854,7 +867,7 @@ describe("a change landing between the permission check and the write", () => {
   });
 
   it("won't hand a claim link to someone who joined in the meantime", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     const rahul = await createUser();
     authz.afterCheck = () => db.groupMember.update({ where: { id: p.id }, data: { userId: rahul.id, claimToken: null } });
     await expect(regenerateClaimToken(asha.id, p.id)).rejects.toBeInstanceOf(UserError);
@@ -881,28 +894,43 @@ describe("actions", () => {
   it("addPlaceholderAction cleans the form input and refreshes the group", async () => {
     signInAs(asha);
     const res = await addPlaceholderAction({ groupId: g.id, displayName: " Rahul ", email: "Rahul@Example.test" });
-    expect(res).toMatchObject({ ok: true, data: { displayName: "Rahul", email: "rahul@example.test" } });
+    expect(res).toMatchObject({ ok: true, data: { member: { displayName: "Rahul", email: "rahul@example.test" }, emailSent: true } });
     expect(revalidatePath).toHaveBeenCalledWith(`/groups/${g.id}`);
-    expect(await addPlaceholderAction({ groupId: g.id, displayName: "Priya", email: "" })).toMatchObject({ ok: true, data: { email: null } });
+    expect(await addPlaceholderAction({ groupId: g.id, displayName: "Priya", email: "" })).toMatchObject({
+      ok: true,
+      data: { member: { email: null }, emailSent: null },
+    });
     expect(await addPlaceholderAction({ groupId: g.id, displayName: "Bad", email: "nope" })).toMatchObject({ ok: false });
     expect(await addPlaceholderAction({ groupId: "", displayName: "Bad" })).toMatchObject({ ok: false });
   });
 
-  it("addPlaceholderAction tells the person about the invite limit, and still refreshes since the person was added", async () => {
+  it("addPlaceholderAction succeeds at the invite limit, with emailSent false, and refreshes so the person shows up", async () => {
     await db.emailLog.createMany({
       data: Array.from({ length: 20 }, () => ({ kind: "invite", toEmail: "someone@example.test", senderUserId: asha.id })),
     });
     signInAs(asha);
+    expect(await addPlaceholderAction({ groupId: g.id, displayName: "Rahul", email: "rahul@example.test" })).toMatchObject({
+      ok: true,
+      data: { member: { displayName: "Rahul", email: "rahul@example.test", userId: null }, emailSent: false },
+    });
+    expect(await db.groupMember.count({ where: { groupId: g.id, userId: null } })).toBe(1);
+    expect(revalidatePath).toHaveBeenCalledWith(`/groups/${g.id}`);
+  });
+
+  it("addPlaceholderAction keeps the person and refreshes when sending fails for another reason", async () => {
+    vi.mocked(sendEmail).mockRejectedValueOnce(new Error("smtp down"));
+    vi.spyOn(console, "error").mockImplementationOnce(() => {}); // defineAction logs unexpected errors
+    signInAs(asha);
     expect(await addPlaceholderAction({ groupId: g.id, displayName: "Rahul", email: "rahul@example.test" })).toEqual({
       ok: false,
-      error: "You've sent a lot of invites. Try again in an hour.",
+      error: "Something went wrong. Please try again.",
     });
     expect(await db.groupMember.count({ where: { groupId: g.id, userId: null } })).toBe(1);
     expect(revalidatePath).toHaveBeenCalledWith(`/groups/${g.id}`);
   });
 
   it("claimPlaceholderAction claims and refreshes", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     const rahul = await createUser();
     signInAs(rahul);
     expect(await claimPlaceholderAction({ token: p.claimToken! })).toEqual({ ok: true, data: { groupId: g.id } });
@@ -928,7 +956,7 @@ describe("actions", () => {
 
   it("run the admin and owner operations and refresh the dashboard and group", async () => {
     const { user: ravi, member } = await memberWith("MEMBER");
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul" });
+    const p = await placeholder(asha.id, g.id, { displayName: "Rahul" });
     signInAs(asha);
 
     expect(await setMemberRoleAction({ groupId: g.id, memberId: member.id, role: "ADMIN" })).toEqual({ ok: true, data: undefined });

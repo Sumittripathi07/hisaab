@@ -35,7 +35,7 @@ export const addPlaceholderAction = defineAction(addPlaceholderSchema, async ({ 
   try {
     return await addPlaceholder(user.id, groupId, input);
   } finally {
-    refresh(groupId); // also after a refused invite email: the person was still added
+    refresh(groupId); // also when the invite email failed to send: the person was still added
   }
 });
 

@@ -1,5 +1,6 @@
 import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
 import { lastEmailTo } from "../test/outbox";
+import { prisma } from "./global-setup";
 
 // Better Auth allows 5 magic links a minute per IP, and every test signs in from the same one. So each person signs in
 // once per run: their session is kept here and reused by signedInPage. (The worker is the same process for the whole run,
@@ -17,7 +18,9 @@ export async function signInWithMagicLink(page: Page, email: string): Promise<vo
   await expect(page.getByRole("heading", { name: "Check your inbox" })).toBeVisible();
   const link = (await lastEmailTo(email)).text.match(/https?:\/\/\S+/)?.[0];
   if (!link) throw new Error(`No sign-in link in the email to ${email}`);
-  await page.goto(link);
+  const response = await page.goto(link);
+  // The limiter answers before Better Auth does, so this is a bare 429 page rather than a failed sign-in.
+  if (response?.status() === 429) throw new Error("Hit Better Auth's magic-link limit (5 a minute per IP): reuse sessions with signedInPage");
   sessions.set(email, await page.context().storageState());
 }
 
@@ -51,6 +54,16 @@ export async function signedInPage(browser: Browser, email: string, name: string
   }
   await expect(page).toHaveURL(/\/dashboard$/);
   return page;
+}
+
+/** Uses up `email`'s invite emails for the hour (20) in the test database, so the limit is tested without sending 20. */
+export function useUpInviteLimit(email: string): void {
+  prisma(
+    ["db", "execute", "--stdin"],
+    `INSERT INTO "EmailLog" (id, kind, "toEmail", "senderUserId")
+     SELECT md5(random()::text), 'invite', 'seeded@example.test', id FROM "user", generate_series(1, 20)
+     WHERE email = '${email.replaceAll("'", "''")}'`,
+  );
 }
 
 /** Creates a group from the sidebar (desktop) and returns its page's URL. */

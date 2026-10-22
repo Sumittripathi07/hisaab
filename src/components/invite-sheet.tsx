@@ -1,6 +1,6 @@
 "use client";
 
-import { Copy, LoaderCircle, Share2, UserPlus } from "lucide-react";
+import { Copy, LoaderCircle, MailWarning, Share2, UserPlus } from "lucide-react";
 import { useId, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { z } from "zod";
@@ -123,6 +123,8 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
   const [email, setEmail] = useState("");
   const [errors, setErrors] = useState<{ name?: string; email?: string; form?: string }>({});
   const [pending, setPending] = useState(false);
+  // The person was added but an email limit stopped the invite: say so where they'll see it, not just in a toast.
+  const [unsent, setUnsent] = useState(false);
 
   async function submit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -132,6 +134,7 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
       email: withEmail ? firstError(emailSchema.safeParse(email)) : undefined,
     };
     setErrors(issues);
+    setUnsent(false);
     if (issues.name) return nameRef.current?.focus();
     if (issues.email) return emailRef.current?.focus();
 
@@ -142,7 +145,9 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
     }));
     setPending(false);
     if (!result.ok) return setErrors({ form: result.error });
-    toast.success(withEmail ? `Invite sent to ${result.data.email}` : `${result.data.displayName} added`);
+    const { member, emailSent } = result.data;
+    toast.success(`${member.displayName} was added`, emailSent ? { description: `Invite sent to ${member.email}` } : undefined);
+    setUnsent(emailSent === false);
     setName("");
     setEmail("");
     nameRef.current?.focus(); // ready for the next person
@@ -182,6 +187,7 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
             onChange={(e) => {
               setName(e.target.value);
               setErrors((errs) => ({ ...errs, name: undefined, form: undefined }));
+              setUnsent(false);
             }}
           />
           <FieldError id={`${id}-name-error`}>{errors.name}</FieldError>
@@ -203,6 +209,7 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
               onChange={(e) => {
                 setEmail(e.target.value);
                 setErrors((errs) => ({ ...errs, email: undefined, form: undefined }));
+                setUnsent(false);
               }}
             />
             <FieldError id={`${id}-email-error`}>{errors.email}</FieldError>
@@ -210,6 +217,15 @@ function PlaceholderForm({ groupId, withEmail = false }: { groupId: string; with
         )}
       </div>
       <FieldError>{errors.form}</FieldError>
+      {/* Always in the page, so screen readers announce the notice when it appears. */}
+      <div role="status">
+        {unsent && (
+          <p className="flex gap-2.5 rounded-xl border border-amber-500/30 bg-amber-50 p-3 text-sm dark:bg-amber-400/10">
+            <MailWarning className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-300" aria-hidden />
+            We couldn&apos;t send the email right now — copy their invite link from the list and share it yourself.
+          </p>
+        )}
+      </div>
       <Button type="submit" variant="secondary" className="h-11 rounded-xl text-base" disabled={pending}>
         {pending && <LoaderCircle className="animate-spin" aria-hidden />}
         {withEmail ? "Send invite" : "Add"}
