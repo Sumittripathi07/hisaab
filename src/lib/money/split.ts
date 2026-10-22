@@ -65,13 +65,15 @@ export function splitExpense(total: bigint, spec: SplitSpec, currency: string): 
       break;
     case "ITEMIZED": {
       if (!spec.items.length) return fail("Add at least one item");
-      const unassigned = spec.items.find((item) => !item.memberIds.length);
-      if (unassigned) return fail(`Choose who had “${unassigned.name}”`);
+      for (const item of spec.items) {
+        if (!item.memberIds.length) return fail(`Choose who had “${item.name}”`);
+        if (item.amount <= 0n) return fail(`Enter an amount for “${item.name}”`);
+      }
       const extras = base - sum(spec.items.map((item) => item.amount));
       if (extras < 0n) return fail(`Items add up to ${formatMoney(-extras, currency)} more than the total`);
       for (const item of spec.items) spread(item.amount, equally(item.memberIds));
-      // Tax, tip & service follow each person's item subtotal. Skipped when there's none, so all-₹0 items still split.
-      if (extras > 0n) spread(extras, [...shares].map(([memberId, value]) => ({ memberId, value })));
+      // Tax, tip & service follow each person's item subtotal (never all zero: every item costs something).
+      spread(extras, [...shares].map(([memberId, value]) => ({ memberId, value })));
       break;
     }
   }

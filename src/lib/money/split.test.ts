@@ -43,6 +43,8 @@ describe("splits", () => {
     expect(shares(splitExpense(55000n, { method: "ITEMIZED", items }, "INR"))).toEqual({ a: 44000n, b: 11000n });
     expect(shares(splitExpense(40000n, { method: "ITEMIZED", items }, "INR"))).toBe("Items add up to ₹100 more than the total");
     expect(shares(splitExpense(55000n, { method: "ITEMIZED", items: [{ ...items[1], memberIds: [] }] }, "INR"))).toBe("Choose who had “Biryani”");
+    expect(shares(splitExpense(500n, { method: "ITEMIZED", items: [{ name: "Biryani", amount: 0n, memberIds: ["a"] }] }, "INR")))
+      .toBe("Enter an amount for “Biryani”");
   });
   it("adjustments come off the top", () => {
     expect(shares(splitExpense(100000n, { method: "EQUAL", memberIds: ["a", "b", "c"], adjustments: [p("b", 10000n)] }, "INR")))
@@ -93,7 +95,8 @@ describe("splits", () => {
         return some.length ? some : [ids[int(ids.length)]];
       };
 
-      const method = methods[int(methods.length)];
+      // ITEMIZED (last) needs base ≥ 1, since every item costs something
+      const method = methods[int(base > 0n ? methods.length : methods.length - 1)];
       const spec: SplitSpec =
         method === "EQUAL" ? { method, memberIds: ids, adjustments }
         : method === "EXACT" ? { method, amounts: parts(cut(base, ids.length)), adjustments }
@@ -101,8 +104,10 @@ describe("splits", () => {
         : method === "SHARES" ? { method, shares: parts(ids.map((_, k) => BigInt(k === 0 ? 1 + int(999) : int(1000)))), adjustments }
         : {
             method,
-            // items cover 1..base (all of it, or less and the rest is tax & tip); nothing when base is 0
-            items: cut(base && 1n + below(base), 1 + int(4)).map((amount, k) => ({ name: `Item ${k}`, amount, memberIds: somePeople() })),
+            // 1–4 items covering 1..base (all of it, or less and the rest is tax & tip); ₹0 parts dropped
+            items: cut(1n + below(base), 1 + int(4))
+              .filter((amount) => amount > 0n)
+              .map((amount, k) => ({ name: `Item ${k}`, amount, memberIds: somePeople() })),
             adjustments,
           };
 
