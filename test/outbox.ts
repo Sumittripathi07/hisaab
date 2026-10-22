@@ -1,6 +1,7 @@
 import { mkdir, readdir, readFile, rm } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import type { EmailKind } from "@/lib/email";
+import { outboxDir } from "@/lib/outbox-dir";
 
 export type OutboxEmail = {
   to: string;
@@ -12,8 +13,8 @@ export type OutboxEmail = {
 };
 
 // Reads SMTP_URL directly (not via @/lib/env) so e2e can reuse this without pulling in the database.
-// `file://./dir` is relative to the working directory, matching src/lib/email.ts.
-const dir = () => resolve((process.env.SMTP_URL ?? "").replace(/^file:\/\//, ""));
+// outboxDir throws unless SMTP_URL is a safe file:// dir, so clearOutbox can never delete the working directory.
+const dir = () => outboxDir(process.env.SMTP_URL);
 
 /** Every email written so far, oldest first. */
 export async function readOutbox(): Promise<OutboxEmail[]> {

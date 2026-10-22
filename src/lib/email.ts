@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { createTransport } from "nodemailer";
 import { db } from "@/lib/db";
 import { env } from "@/lib/env";
+import { outboxDir } from "@/lib/outbox-dir";
 
 export type EmailKind = "magic_link" | "invite";
 
@@ -27,8 +28,7 @@ let smtp: ReturnType<typeof createTransport> | undefined;
 
 async function deliver(mail: Email): Promise<void> {
   if (env.SMTP_URL.startsWith("file://")) {
-    // A relative `file://./dir` resolves against process.cwd().
-    const dir = resolve(env.SMTP_URL.slice("file://".length));
+    const dir = outboxDir(env.SMTP_URL);
     await mkdir(dir, { recursive: true });
     const name = `${Date.now()}-${randomBytes(4).toString("hex")}.json`;
     await writeFile(join(dir, name), JSON.stringify({ ...mail, createdAt: new Date().toISOString() }));
