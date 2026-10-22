@@ -1,3 +1,7 @@
+# Prisma's install scripts fetch the schema engine, so `migrate deploy` in the image doesn't download it on first run.
+onlyBuiltDependencies:
+  - "@prisma/engines"
+  - prisma
 ignoredBuiltDependencies:
   - sharp
   - unrs-resolver

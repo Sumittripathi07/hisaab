@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env*
+e2e
+test
+docs
+# Generated inside the image by `prisma generate`; never trust a host copy.
+src/generated
+.superpowers
