@@ -21,8 +21,18 @@ export const auth = betterAuth({
       onboardedAt: { type: "date", required: false, input: false },
     },
   },
-  // Better Auth skips the origin and callback-URL checks whenever NODE_ENV is "test". Keep them on everywhere.
-  advanced: { disableOriginCheck: false },
+  advanced: {
+    // Better Auth skips the origin and callback-URL checks whenever NODE_ENV is "test". Keep them on everywhere.
+    disableOriginCheck: false,
+    // Per-IP rate limiting and session IP tracking. Cloud Run's front end appends the real client IP to
+    // X-Forwarded-For; anything to its left is client-supplied and spoofable. With no trustedProxies, Better Auth
+    // refuses any multi-value header and every request lands in one shared "no-trusted-ip" bucket. With them, it
+    // walks the header from the right, skips these hops, and takes the first other address: the right-most entry on
+    // run.app, or the one before the load balancer if one is ever put in front. Never the left-most.
+    // These are Google's documented load balancer / health check ranges. Keep them narrow: a broad range that also
+    // covers clients would let a spoofed entry through.
+    ipAddress: { trustedProxies: ["130.211.0.0/22", "35.191.0.0/16"] },
+  },
   session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
   rateLimit: { enabled: true, storage: "database" },
   // The same email via magic link and via Google is one user.

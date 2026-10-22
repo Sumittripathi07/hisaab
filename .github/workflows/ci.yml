@@ -68,6 +68,8 @@ jobs:
       IMAGE: ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/hisaab
       RUNTIME_SA: ${{ vars.GCP_RUNTIME_SA }}
       SQL_INSTANCE: ${{ vars.GCP_SQL_INSTANCE }}
+      # The public origin: Better Auth builds magic links and the Google redirect URI from it.
+      APP_URL: ${{ vars.APP_URL }}
     steps:
       - uses: actions/checkout@v7
       - uses: google-github-actions/auth@v3
@@ -92,10 +94,17 @@ jobs:
         run: |
           gcloud run deploy hisaab-web --image "$IMAGE/web:$GITHUB_SHA" --region "$REGION" \
             --service-account "$RUNTIME_SA" --add-cloudsql-instances "$SQL_INSTANCE" \
-            --set-secrets DATABASE_URL=HISAAB_DATABASE_URL:latest \
+            --set-secrets DATABASE_URL=HISAAB_DATABASE_URL:latest,BETTER_AUTH_SECRET=HISAAB_BETTER_AUTH_SECRET:latest,GOOGLE_CLIENT_ID=HISAAB_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=HISAAB_GOOGLE_CLIENT_SECRET:latest,SMTP_URL=HISAAB_SMTP_URL:latest \
+            --set-env-vars "BETTER_AUTH_URL=$APP_URL,EMAIL_FROM=Hisaab <sumit.tpt07@gmail.com>" \
             --min-instances 0 --max-instances 3 --concurrency 500 --timeout 3600 \
             --cpu 1 --memory 512Mi --port 8080 --allow-unauthenticated
       - name: Smoke check
         run: |
           URL=$(gcloud run services describe hisaab-web --region "$REGION" --format 'value(status.url)')
-          curl -fsS "$URL/api/health"
+          # /api/health loads env.ts (all real secrets) and queries the DB. /api/auth/ok loads the Better Auth instance
+          # (Google client config). /sign-in is the page people land on; it renders without env, so it is not proof alone.
+          for path in /api/health /api/auth/ok /sign-in; do
+            code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL$path")
+            echo "GET $path -> $code"
+            [ "$code" = 200 ] || { echo "expected 200 from $path" >&2; exit 1; }
+          done

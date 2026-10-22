@@ -30,6 +30,16 @@ gcloud projects describe "$PROJECT_ID" "${P[@]}" >/dev/null 2>&1 ||
   die "billing is not enabled on $PROJECT_ID; link billing in the console first"
 echo "preflight: project $PROJECT_ID exists, billing enabled"
 
+has_version() { [[ -n $(gcloud secrets versions list "$1" --limit=1 --format='value(name)' "${P[@]}") ]]; }
+# Owner-managed secrets: Sumit adds these (values never pass through this script or chat). This script only grants
+# access to them, so fail early and clearly if one is missing rather than half-way through the IAM steps.
+OWNER_SECRETS=(HISAAB_GOOGLE_CLIENT_ID HISAAB_GOOGLE_CLIENT_SECRET HISAAB_SMTP_URL)
+for s in "${OWNER_SECRETS[@]}"; do
+  has_version "$s" 2>/dev/null ||
+    die "secret $s is missing or has no version; add it first (README: Secrets), then re-run"
+done
+echo "preflight: ${OWNER_SECRETS[*]} exist"
+
 # --- APIs
 enabled=$(gcloud services list --enabled "${P[@]}" --format='value(config.name)')
 missing=()
@@ -60,7 +70,6 @@ for s in HISAAB_DATABASE_URL HISAAB_BETTER_AUTH_SECRET; do
   if gcloud secrets describe "$s" "${P[@]}" >/dev/null 2>&1; then skip "secret $s"
   else step "secret $s"; gcloud secrets create "$s" --replication-policy=automatic "${P[@]}"; fi
 done
-has_version() { [[ -n $(gcloud secrets versions list "$1" --limit=1 --format='value(name)' "${P[@]}") ]]; }
 
 # The SQL user's password and the HISAAB_DATABASE_URL version are always written together from one
 # generated value, so they never drift apart. Postgres users can't be created without a password.
@@ -114,6 +123,7 @@ bind projects "$PROJECT_ID" "serviceAccount:$DEPLOYER_SA" roles/artifactregistry
 # Secret access is per secret, not project-wide: other apps' secrets live in this project too.
 bind secrets HISAAB_DATABASE_URL "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
 bind secrets HISAAB_BETTER_AUTH_SECRET "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
+for s in "${OWNER_SECRETS[@]}"; do bind secrets "$s" "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor; done
 bind "iam service-accounts" "$RUN_SA" "serviceAccount:$DEPLOYER_SA" roles/iam.serviceAccountUser
 
 # --- Workload Identity Federation for GitHub Actions
