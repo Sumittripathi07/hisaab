@@ -8,6 +8,11 @@ describe("bannerFor (the ?error= Better Auth sends people back with)", () => {
     expect(bannerFor(code)).toBe("That sign-in link has expired or was already used. Send yourself a new one below."),
   );
 
+  it.each(["failed_to_create_user", "user_not_found", "failed_to_create_session", "new_user_signup_disabled"])(
+    "doesn't blame Google when a good magic link failed on our side (%s)",
+    (code) => expect(bannerFor(code)).toBe("Sign-in didn't work. Send yourself a new link below, or continue with Google."),
+  );
+
   it("says Google was cancelled when the person backed out there", () =>
     expect(bannerFor("access_denied")).toBe("Google sign-in was cancelled. Try again, or email yourself a sign-in link below."));
 
