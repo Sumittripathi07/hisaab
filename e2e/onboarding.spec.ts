@@ -1,8 +1,9 @@
 import { expect, test } from "@playwright/test";
 import { lastEmailTo } from "../test/outbox";
-import { signedInPage, signInWithMagicLink } from "./helpers";
+import { newPage, signedInPage, signInWithMagicLink } from "./helpers";
 
-test("new user signs in, onboards, lands on dashboard", async ({ page }) => {
+test("new user signs in, onboards, lands on dashboard", async ({ browser }) => {
+  const page = await newPage(browser);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/sign-in\?callbackURL=%2Fdashboard/);
   await signInWithMagicLink(page, "neha@example.test");
@@ -30,11 +31,21 @@ test("a magic link that was already used shows a friendly message and signs nobo
   const link = (await lastEmailTo("neha@example.test")).text.match(/https?:\/\/\S+/)?.[0];
   if (!link) throw new Error("No sign-in link in the email to neha@example.test");
 
-  const page = await (await browser.newContext()).newPage();
+  const page = await newPage(browser);
   await page.goto(link);
   await expect(page).toHaveURL(/\/sign-in\?/);
   await expect(page.getByText("That sign-in link has expired or was already used.")).toBeVisible();
   expect((await page.context().cookies()).some((c) => c.name.includes("session_token"))).toBe(false);
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/sign-in\?callbackURL=%2Fdashboard$/);
+});
+
+test("a failed Google sign-in lands on sign-in with a friendly message, never the raw error code", async ({ page }) => {
+  // Better Auth's own error page forwards to sign-in (onAPIError.errorURL in auth.ts); test/auth.test.ts covers the callback.
+  await page.goto("/api/auth/error?error=state_mismatch");
+  await expect(page).toHaveURL(/\/sign-in\?error=state_mismatch$/);
+  await expect(page.getByText("Google sign-in didn't work. Please try again, or use an email link.")).toBeVisible();
+  await page.goto("/sign-in?error=%3Cb%3Eunable_to_link_account%3C%2Fb%3E");
+  await expect(page.getByText("Google sign-in didn't work. Please try again, or use an email link.")).toBeVisible();
+  await expect(page.getByText("unable_to_link_account")).toHaveCount(0);
 });

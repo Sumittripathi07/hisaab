@@ -3,6 +3,7 @@ import { lastEmailTo, readOutbox } from "../test/outbox";
 import {
   completeOnboardingUi,
   createGroupViaUi,
+  newPage,
   signedInPage,
   signInAndOnboard,
   signInWithMagicLink,
@@ -14,7 +15,8 @@ test("the root sends a signed-out visitor to sign-in", async ({ page }) => {
   await expect(page).toHaveURL(/\/sign-in$/);
 });
 
-test("create a group from the empty dashboard", async ({ page }) => {
+test("create a group from the empty dashboard", async ({ browser }) => {
+  const page = await newPage(browser);
   await signInAndOnboard(page, "asha@example.test", "Asha");
   await expect(page.getByText("No groups yet")).toBeVisible();
   await page.getByRole("button", { name: "Create a group" }).click();
@@ -59,8 +61,7 @@ test("create a group from the empty dashboard", async ({ page }) => {
 /** A person's row in the group's member list. */
 const memberRow = (page: Page, name: string) => page.getByRole("list", { name: "Members" }).getByRole("listitem").filter({ hasText: name });
 
-// Asha signed up in the test above; signedInPage reuses her session (see helpers.ts), so this run stays within
-// Better Auth's sign-in limit.
+// Asha signed up in the test above; signedInPage reuses her session (see helpers.ts).
 test("signed-out friend opens the invite link, signs up, and joins", async ({ browser }) => {
   const a = await signedInPage(browser, "asha@example.test", "Asha");
   const groupUrl = await createGroupViaUi(a, "Goa Trip");
@@ -72,7 +73,7 @@ test("signed-out friend opens the invite link, signs up, and joins", async ({ br
   await expect(a.getByText("Link copied")).toBeVisible();
   expect(await a.evaluate(() => navigator.clipboard.readText())).toBe(invite);
 
-  const b = await (await browser.newContext()).newPage();
+  const b = await newPage(browser);
   await b.goto(invite);
   await expect(b).toHaveURL(/\/sign-in\?callbackURL=%2Fjoin%2F/);
   await signInWithMagicLink(b, "ravi@example.test");
@@ -101,7 +102,7 @@ test("placeholder invited by email claims their spot once", async ({ browser }) 
   const claimUrl = (await lastEmailTo("rahul@example.test")).text.match(/https?:\/\/\S+\/claim\/\S+/)?.[0];
   if (!claimUrl) throw new Error("No claim link in the invite email");
 
-  const b = await (await browser.newContext()).newPage();
+  const b = await newPage(browser);
   await b.goto(claimUrl);
   await expect(b).toHaveURL(/\/sign-in\?callbackURL=%2Fclaim%2F/);
   await signInWithMagicLink(b, "rahul@example.test");
@@ -137,6 +138,22 @@ test("non-admins do not see group settings", async ({ browser }) => {
 
   await r.goto(`${groupUrl}/settings`);
   await expect(r.getByRole("heading", { name: "You don't have access" })).toBeVisible();
+  await r.getByRole("link", { name: "Go to dashboard" }).click();
+  await expect(r).toHaveURL(/\/dashboard$/);
+});
+
+test("a group you're not in, or an address that doesn't exist, gets a friendly 404 with a way home", async ({ browser }) => {
+  const a = await signedInPage(browser, "asha@example.test", "Asha");
+  const groupUrl = await createGroupViaUi(a, "Secret santa");
+  const k = await signedInPage(browser, "kavya@example.test", "Kavya");
+  for (const url of [groupUrl, "/no-such-page"]) {
+    const response = await k.goto(url);
+    expect(response?.status()).toBe(404);
+    await expect(k.getByRole("heading", { name: "We couldn't find that page" })).toBeVisible();
+    await expect(k.getByText("Secret santa")).toHaveCount(0);
+  }
+  await k.getByRole("link", { name: "Go to dashboard" }).click();
+  await expect(k).toHaveURL(/\/dashboard$/);
 });
 
 test("the owner runs the group from its settings", async ({ browser }) => {

@@ -12,7 +12,7 @@ const baseURL = `http://localhost:${PORT}`;
 export default defineConfig({
   testDir: "e2e",
   globalSetup: "./e2e/global-setup.ts",
-  // Tests share one database and one outbox, and sign in from one IP (Better Auth rate-limits sign-ins per IP).
+  // Tests share one database and one outbox. (Better Auth rate-limits sign-ins per IP: see newPage in e2e/helpers.ts.)
   workers: 1,
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",

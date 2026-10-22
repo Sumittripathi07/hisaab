@@ -1,10 +1,22 @@
-import { expect, type Browser, type BrowserContext, type Page } from "@playwright/test";
+import { expect, type Browser, type BrowserContext, type BrowserContextOptions, type Page } from "@playwright/test";
 import { lastEmailTo } from "../test/outbox";
 import { prisma } from "./global-setup";
 
-// Better Auth allows 5 magic links a minute per IP, and every test signs in from the same one. So each person signs in
-// once per run: their session is kept here and reused by signedInPage. (The worker is the same process for the whole run,
-// since there's one worker; after a failed test Playwright starts a new one, and people simply sign in again.)
+let lastIp = 0;
+/**
+ * A page in a fresh browser context (a separate browser, as another person would have) with a client IP of its own.
+ * Better Auth limits magic links to 5 a minute per IP and reads the IP from X-Forwarded-For. Nothing sits in front of the
+ * e2e server and Next only fills that header in when it's missing, and 10.x is outside auth.ts's trustedProxies, so each
+ * context counts as its own client instead of every test sharing one budget.
+ */
+export async function newPage(browser: Browser, options: BrowserContextOptions = {}): Promise<Page> {
+  const context = await browser.newContext({ ...options, extraHTTPHeaders: { "x-forwarded-for": `10.0.0.${++lastIp}` } });
+  return context.newPage();
+}
+
+// Each person signs in once per run and their session is kept here for signedInPage: quicker than signing in again.
+// (The worker is the same process for the whole run, since there's one worker; after a failed test Playwright starts a
+// new one, and people simply sign in again.)
 const sessions = new Map<string, Awaited<ReturnType<BrowserContext["storageState"]>>>();
 
 /**
@@ -20,7 +32,7 @@ export async function signInWithMagicLink(page: Page, email: string): Promise<vo
   if (!link) throw new Error(`No sign-in link in the email to ${email}`);
   const response = await page.goto(link);
   // The limiter answers before Better Auth does, so this is a bare 429 page rather than a failed sign-in.
-  if (response?.status() === 429) throw new Error("Hit Better Auth's magic-link limit (5 a minute per IP): reuse sessions with signedInPage");
+  if (response?.status() === 429) throw new Error("Hit Better Auth's magic-link limit (5 a minute per IP): sign in from a newPage");
   sessions.set(email, await page.context().storageState());
 }
 
@@ -45,7 +57,7 @@ export async function signInAndOnboard(page: Page, email: string, name: string):
 
 /** A page of its own (a separate browser) signed in as `email`, onboarded as `name` if new, on the dashboard. */
 export async function signedInPage(browser: Browser, email: string, name: string): Promise<Page> {
-  const page = await (await browser.newContext({ storageState: sessions.get(email) })).newPage();
+  const page = await newPage(browser, { storageState: sessions.get(email) });
   await page.goto("/dashboard");
   if (new URL(page.url()).pathname === "/sign-in") await signInWithMagicLink(page, email);
   if (new URL(page.url()).pathname === "/onboarding") {
