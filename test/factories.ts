@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import type { User } from "@/generated/prisma/client";
+import { newInviteCode } from "@/lib/tokens";
+import type { Group, GroupMember, MemberRole, User } from "@/generated/prisma/client";
 
 let counter = 0;
 
@@ -15,4 +16,34 @@ export function createUser(overrides: Partial<User> = {}): Promise<User> {
       ...overrides,
     },
   });
+}
+
+let groupCounter = 0;
+
+/** A group with `ownerId` as its OWNER member. */
+export async function createGroup(ownerId: string, overrides: Partial<Group> = {}): Promise<Group> {
+  groupCounter += 1;
+  const owner = await db.user.findUniqueOrThrow({ where: { id: ownerId } });
+  return db.group.create({
+    data: {
+      name: `Group ${groupCounter}`,
+      emoji: "👥",
+      color: "emerald",
+      type: "OTHER",
+      baseCurrency: "INR",
+      inviteCode: newInviteCode(),
+      createdById: ownerId,
+      ...overrides,
+      members: { create: { userId: ownerId, displayName: owner.name, role: "OWNER" } },
+    },
+  });
+}
+
+/** A member row: a real user when `userId` is given, otherwise a placeholder. */
+export async function addMember(
+  groupId: string,
+  data: { userId?: string; role?: MemberRole; leftAt?: Date; displayName?: string; email?: string; claimToken?: string } = {},
+): Promise<GroupMember> {
+  const user = data.userId ? await db.user.findUniqueOrThrow({ where: { id: data.userId } }) : null;
+  return db.groupMember.create({ data: { ...data, groupId, displayName: data.displayName ?? user?.name ?? "Placeholder" } });
 }
