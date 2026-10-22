@@ -5,7 +5,7 @@ export const metadata: Metadata = { title: "Dashboard · Hisaab" };
 
 // Placeholder: groups arrive in a later task.
 export default async function DashboardPage() {
-  const user = await requireOnboardedUser("/dashboard");
+  const user = await requireOnboardedUser();
   const firstName = user.name.trim().split(/\s+/)[0];
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: user.timezone }).format(new Date());
 

@@ -32,7 +32,7 @@ function lastActive(date: Date) {
 
 export default async function AccountPage() {
   const [user, current] = await Promise.all([
-    requireOnboardedUser("/account"),
+    requireOnboardedUser(),
     auth.api.getSession({ headers: await headers() }),
   ]);
   const sessions = await listActiveSessions(user.id);

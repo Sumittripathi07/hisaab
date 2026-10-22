@@ -10,3 +10,9 @@ export function safeCallback(url: string | null | undefined, fallback = "/dashbo
   // Browsers drop tabs and newlines inside a URL, so "/\t/evil.com" is really "//evil.com". Resolving it catches that.
   return new URL(url, BASE).origin === BASE ? url : fallback;
 }
+
+/**
+ * The proxy sets this request header to the path being visited (pathname + search), so server code can send people
+ * back there after sign-in. A client can send it too on routes the proxy doesn't cover: run it through safeCallback.
+ */
+export const RETURN_TO_HEADER = "x-hisaab-path";
