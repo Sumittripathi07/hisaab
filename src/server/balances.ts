@@ -49,7 +49,10 @@ export type GroupBalances = {
   settled: boolean;
 };
 
-/** Everyone's balance and who should pay whom. People who left are listed while they still owe or are owed. */
+/**
+ * Everyone's balance and who should pay whom. People who left are listed while they still owe or are owed, or while a
+ * transfer names them: pairwise debts can leave someone with a net of zero both owing and owed.
+ */
 export async function getGroupBalances(userId: string, groupId: string): Promise<GroupBalances> {
   const { group, member: me } = await requireMember(userId, groupId);
   const [nets, rows] = await Promise.all([
@@ -60,6 +63,8 @@ export async function getGroupBalances(userId: string, groupId: string): Promise
       include: { user: { select: { image: true } } },
     }),
   ]);
+  const transfers = group.simplifyDebts ? simplifyDebts(nets) : pairwiseDebts(await groupEvents(groupId));
+  const involved = new Set(transfers.flatMap((x) => [x.from, x.to]));
   const members = rows
     .map((m) => ({
       memberId: m.id,
@@ -69,15 +74,15 @@ export async function getGroupBalances(userId: string, groupId: string): Promise
       active: m.leftAt === null,
       net: nets.get(m.id) ?? 0n,
     }))
-    .filter((m) => m.active || m.net !== 0n);
+    .filter((m) => m.active || m.net !== 0n || involved.has(m.memberId));
   return {
     currency: group.baseCurrency,
     simplified: group.simplifyDebts,
     members,
-    transfers: group.simplifyDebts ? simplifyDebts(nets) : pairwiseDebts(await groupEvents(groupId)),
+    transfers,
     myMemberId: me.id,
     myNet: nets.get(me.id) ?? 0n,
-    settled: [...nets.values()].every((net) => net === 0n),
+    settled: transfers.length === 0,
   };
 }
 

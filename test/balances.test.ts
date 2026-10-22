@@ -99,6 +99,39 @@ describe("getGroupBalances", () => {
     expect(netsByName(pairwise)).toEqual(netsByName(simplified));
   });
 
+  it("in pairwise mode, lists everyone a transfer names, even someone who left at a net of zero", async () => {
+    await expense(10000n, [[A, 10000n]], equal([A, B]));
+    await expense(10000n, [[B, 10000n]], equal([B, C]));
+    await db.group.update({ where: { id: g.id }, data: { simplifyDebts: false } });
+    await removeMember(a.id, B.id); // B's net is 0, so the leave rule lets them go
+
+    const b = await getGroupBalances(a.id, g.id);
+    expect(b.transfers).toEqual(expect.arrayContaining([t(B, A, 5000n), t(C, B, 5000n)]));
+    const listed = new Set(b.members.map((m) => m.memberId));
+    expect(b.transfers.every((x) => listed.has(x.from) && listed.has(x.to))).toBe(true);
+    expect(b.members.find((m) => m.memberId === B.id)).toMatchObject({ active: false, net: 0n });
+    expect(b.settled).toBe(false);
+  });
+
+  it("a cycle of equal debts is unsettled pairwise, and settled once simplified", async () => {
+    const owes = (debtor: GroupMember, creditor: GroupMember) =>
+      createExpenseRow(g.id, { createdByMemberId: A.id, payers: [[creditor.id, 5000n]], shares: [[debtor.id, 5000n]] });
+    await owes(A, B);
+    await owes(B, C);
+    await owes(C, A);
+
+    await db.group.update({ where: { id: g.id }, data: { simplifyDebts: false } });
+    const pairwise = await getGroupBalances(a.id, g.id);
+    expect(pairwise.transfers).toHaveLength(3);
+    expect(pairwise.transfers).toEqual(expect.arrayContaining([t(A, B, 5000n), t(B, C, 5000n), t(C, A, 5000n)]));
+    expect(pairwise.settled).toBe(false);
+
+    await db.group.update({ where: { id: g.id }, data: { simplifyDebts: true } });
+    const simplified = await getGroupBalances(a.id, g.id);
+    expect(simplified.transfers).toEqual([]);
+    expect(simplified.settled).toBe(true);
+  });
+
   it("ignores deleted expenses and disputed or deleted payments", async () => {
     await createExpenseRow(g.id, { createdByMemberId: A.id, payers: [[A.id, 10000n]], shares: [[A.id, 5000n], [B.id, 5000n]] });
     await createExpenseRow(g.id, { createdByMemberId: A.id, payers: [[C.id, 99999n]], shares: [[D.id, 99999n]], deletedAt: new Date() });
