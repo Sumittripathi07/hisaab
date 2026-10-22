@@ -14,8 +14,12 @@ jobs:
     env:
       # Dummy value: prisma generate (postinstall) and next build load config but never connect.
       DATABASE_URL: postgresql://build:build@localhost:5432/build
-      # Dummy value: next build loads env.ts but sends nothing.
+      # Dummy values: next build loads env.ts but sends and signs nothing.
       SMTP_URL: file:///tmp/outbox
+      BETTER_AUTH_SECRET: dummy-build-secret-abcdefghijklmnopqrstuvwxyz0123
+      BETTER_AUTH_URL: http://localhost:3000
+      GOOGLE_CLIENT_ID: dummy-build-google-client-id
+      GOOGLE_CLIENT_SECRET: dummy-build-google-client-secret
     services:
       postgres:
         image: postgres:16

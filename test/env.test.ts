@@ -5,6 +5,10 @@ const valid = {
   NODE_ENV: "test",
   DATABASE_URL: "postgresql://u:p@localhost:5432/db",
   SMTP_URL: "file:///tmp/outbox",
+  BETTER_AUTH_SECRET: "a".repeat(32),
+  BETTER_AUTH_URL: "http://localhost:3000",
+  GOOGLE_CLIENT_ID: "google-id",
+  GOOGLE_CLIENT_SECRET: "google-secret",
 };
 
 describe("parseEnv", () => {
@@ -16,6 +20,16 @@ describe("parseEnv", () => {
   });
   it("requires SMTP_URL", () => {
     expect(() => parseEnv({ ...valid, SMTP_URL: undefined })).toThrow(/SMTP_URL/);
+  });
+  it("rejects a BETTER_AUTH_SECRET shorter than 32 characters", () => {
+    expect(() => parseEnv({ ...valid, BETTER_AUTH_SECRET: "a".repeat(31) })).toThrow(/BETTER_AUTH_SECRET/);
+  });
+  it("requires BETTER_AUTH_URL to be a URL", () => {
+    expect(() => parseEnv({ ...valid, BETTER_AUTH_URL: "localhost:3000" })).toThrow(/BETTER_AUTH_URL/);
+  });
+  it("requires the Google credentials", () => {
+    expect(() => parseEnv({ ...valid, GOOGLE_CLIENT_ID: undefined })).toThrow(/GOOGLE_CLIENT_ID/);
+    expect(() => parseEnv({ ...valid, GOOGLE_CLIENT_SECRET: undefined })).toThrow(/GOOGLE_CLIENT_SECRET/);
   });
   it("defaults EMAIL_FROM", () => {
     expect(parseEnv(valid).EMAIL_FROM).toBe("Hisaab <no-reply@hisaab.local>");
