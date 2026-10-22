@@ -7,6 +7,7 @@ import { magicLinkEmail } from "@/emails/magic-link";
 import { db } from "@/lib/db";
 import { EmailRateLimitError, sendEmail } from "@/lib/email";
 import { env } from "@/lib/env";
+import { signUpName } from "@/lib/validation";
 
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
@@ -22,8 +23,14 @@ export const auth = betterAuth({
     },
   },
   // Better Auth's built-in profile endpoint takes any name and any image URL (its body is an open record), which would
-  // skip displayNameSchema and reach co-members' screens and invite emails. Profiles change only through our actions.
+  // skip displayNameSchema and reach co-members' screens and invite emails. After sign-up, profiles change only through
+  // our actions. Sign-up itself sets the name (the magic-link body's `name`, or Google's profile); the hook below checks it.
   disabledPaths: ["/update-user"],
+  // Better Auth writes a name only when it creates the user: we leave Google's overrideUserInfoOnSignIn and
+  // accountLinking.updateUserInfoOnLink off, so a later sign-in never replaces it.
+  databaseHooks: {
+    user: { create: { before: async (user) => ({ data: { ...user, name: signUpName(user.name) } }) } },
+  },
   // OAuth failures that happen before Better Auth knows the sign-in's own error URL (a lost or forged state) go to
   // sign-in, which shows a friendly banner, instead of Better Auth's raw error page.
   onAPIError: { errorURL: "/sign-in" },

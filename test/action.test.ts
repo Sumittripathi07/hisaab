@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { displayNameSchema } from "@/lib/validation";
 import { defineAction } from "@/server/action";
@@ -69,6 +69,20 @@ describe("defineAction", () => {
     });
     expect(result).toEqual({ ok: false, error: "Something went wrong. Please try again." });
     expect(log).toHaveBeenCalledOnce();
+  });
+
+  describe("before onboarding", () => {
+    beforeEach(() => void (fakeUser.onboardedAt = null));
+    afterEach(() => void (fakeUser.onboardedAt = new Date()));
+
+    it("sends the person to onboarding without running the handler", async () => {
+      const handler = vi.fn(async () => 1);
+      await expect(defineAction(empty, handler)({})).rejects.toMatchObject({ digest: expect.stringContaining(";/onboarding;") });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it("runs an action that is part of onboarding", async () =>
+      expect(await defineAction(empty, async () => 1, { beforeOnboarding: true })({})).toEqual({ ok: true, data: 1 }));
   });
 
   it("re-throws redirect and notFound untouched", async () => {
