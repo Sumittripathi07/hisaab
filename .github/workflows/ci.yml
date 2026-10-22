@@ -54,6 +54,25 @@ jobs:
       - run: pnpm test:e2e
         env:
           TEST_DATABASE_URL: postgresql://hisaab:hisaab@localhost:5432/hisaab_test
+      # The deploy job builds these same two images; a Dockerfile break should fail the PR, not the production deploy.
+      # Built and thrown away: nothing is pushed.
+      - uses: docker/setup-buildx-action@v4
+      - name: Build the web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: web
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+      - name: Build the migrate image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: migrate
+          outputs: type=cacheonly
+          cache-from: type=gha,scope=migrate
+          cache-to: type=gha,scope=migrate,mode=max
 
   deploy:
     needs: check
@@ -99,12 +118,13 @@ jobs:
             --min-instances 0 --max-instances 3 --concurrency 500 --timeout 3600 \
             --cpu 1 --memory 512Mi --port 8080 --allow-unauthenticated
       - name: Smoke check
+        # On APP_URL, the origin people use and Better Auth is configured for, not the service's own run.app URL.
         run: |
-          URL=$(gcloud run services describe hisaab-web --region "$REGION" --format 'value(status.url)')
           # /api/health loads env.ts (all real secrets) and queries the DB. /api/auth/ok loads the Better Auth instance
           # (Google client config). /sign-in is the page people land on; it renders without env, so it is not proof alone.
+          # Retries cover a cold start; --max-time keeps a hung request from stalling the job.
           for path in /api/health /api/auth/ok /sign-in; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' "$URL$path")
+            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 --retry 3 "${APP_URL%/}$path")
             echo "GET $path -> $code"
             [ "$code" = 200 ] || { echo "expected 200 from $path" >&2; exit 1; }
           done

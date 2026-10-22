@@ -58,8 +58,17 @@ else
   step "sql instance $INSTANCE"
   op=$(gcloud sql instances create "$INSTANCE" --database-version=POSTGRES_16 --edition=ENTERPRISE \
     --tier=db-f1-micro --region="$REGION" --storage-type=SSD --storage-size=10 \
-    --backup-start-time=20:30 --enable-point-in-time-recovery --async --format='value(name)' "${P[@]}")
+    --backup-start-time=20:30 --enable-point-in-time-recovery --deletion-protection --async --format='value(name)' "${P[@]}")
   gcloud sql operations wait "$op" --timeout=unlimited "${P[@]}"
+fi
+
+# Production data: the instance can't be deleted until this is turned off on purpose. Also covers an instance made
+# before the create flag above existed.
+if [[ $(gcloud sql instances describe "$INSTANCE" "${P[@]}" --format='value(settings.deletionProtectionEnabled)') == True ]]; then
+  skip "sql instance $INSTANCE deletion protection"
+else
+  echo "sql instance $INSTANCE deletion protection: enabling"
+  gcloud sql instances patch "$INSTANCE" --deletion-protection --quiet "${P[@]}"
 fi
 
 if gcloud sql databases describe hisaab --instance="$INSTANCE" "${P[@]}" >/dev/null 2>&1; then skip "database hisaab"

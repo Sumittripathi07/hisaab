@@ -10,7 +10,8 @@ Full design: [`docs/superpowers/specs/2026-10-22-hisaab-design.md`](docs/superpo
 
 - **Sign in** with Google or an email magic link. No passwords. The same email via either route is one account.
 - **Onboarding** on first sign-in: name, default currency, optional UPI ID.
-- **Profile and settings**: name, currency, UPI ID, timezone, light/dark/system theme.
+- **Profile and settings**: name, currency, UPI ID, light/dark/system theme. A name change shows in every group.
+  The timezone is detected at onboarding and isn't editable yet.
 - **Groups**: create with an emoji and colour, a type (Trip, Home, Couple, Event, Other) and a base currency. Archive
   and unarchive. Archived groups are read-only.
 - **Invites**: a shareable link with a QR code, the native share sheet (WhatsApp and friends), and a rotatable invite
