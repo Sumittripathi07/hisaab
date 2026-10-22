@@ -49,3 +49,8 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://hisaab:hisaab@localhost:5432/hisaab_test
       - run: pnpm build
+      - run: pnpm exec playwright install --with-deps chromium
+      # Builds again and serves on :3100 against the test DB (playwright.config.ts). SMTP_URL above is the shared outbox.
+      - run: pnpm test:e2e
+        env:
+          TEST_DATABASE_URL: postgresql://hisaab:hisaab@localhost:5432/hisaab_test

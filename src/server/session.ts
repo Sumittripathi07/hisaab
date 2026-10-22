@@ -1,6 +1,7 @@
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@/lib/auth";
+import { db } from "@/lib/db";
 
 export type SessionUser = {
   id: string;
@@ -42,4 +43,17 @@ export async function requireOnboardedUser(returnTo?: string): Promise<SessionUs
     redirect(returnTo ? `/onboarding?callbackURL=${encodeURIComponent(returnTo)}` : "/onboarding");
   }
   return user;
+}
+
+/**
+ * The person's unexpired sessions (their signed-in devices), most recently active first. The same rows
+ * auth.api.listSessions returns, minus its rule that the caller signed in within the last day, which would
+ * hide the list from almost everyone on 30-day sessions.
+ */
+export function listActiveSessions(userId: string) {
+  return db.session.findMany({
+    where: { userId, expiresAt: { gt: new Date() } },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true, userAgent: true, updatedAt: true },
+  });
 }
