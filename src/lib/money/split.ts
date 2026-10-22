@@ -29,7 +29,8 @@ export function allocate(total: bigint, weights: bigint[]): bigint[] {
   return parts;
 }
 
-export function splitExpense(total: bigint, spec: SplitSpec, currency: string): SplitResult {
+/** `order` is the group's member ids, earliest first: when given, an itemised leftover paisa goes by it, not by item order. */
+export function splitExpense(total: bigint, spec: SplitSpec, currency: string, order?: readonly string[]): SplitResult {
   const adjustments = spec.adjustments ?? [];
   const base = total - sumParts(adjustments);
   if (base < 0n) return fail("Adjustments add up to more than the total");
@@ -72,8 +73,14 @@ export function splitExpense(total: bigint, spec: SplitSpec, currency: string): 
       const extras = base - sum(spec.items.map((item) => item.amount));
       if (extras < 0n) return fail(`Items add up to ${formatMoney(-extras, currency)} more than the total`);
       for (const item of spec.items) spread(item.amount, equally(item.memberIds));
+      // Rank people by `order` so which item came first can't steer the leftover paisa. The sort is stable: anyone not in
+      // `order` (or everyone, without it) keeps first-appearance order, after the ranked people.
+      const rank = new Map(order?.map((id, i) => [id, i]));
+      const subtotals = [...shares].sort(([a], [b]) => (rank.get(a) ?? rank.size) - (rank.get(b) ?? rank.size));
+      shares.clear();
+      for (const [memberId, value] of subtotals) shares.set(memberId, value);
       // Tax, tip & service follow each person's item subtotal (never all zero: every item costs something).
-      spread(extras, [...shares].map(([memberId, value]) => ({ memberId, value })));
+      spread(extras, subtotals.map(([memberId, value]) => ({ memberId, value })));
       break;
     }
   }

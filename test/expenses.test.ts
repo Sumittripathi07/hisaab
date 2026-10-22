@@ -68,6 +68,16 @@ describe("createExpense", () => {
     });
   });
 
+  it("gives an itemised leftover paisa to the earliest member, whatever order the items were sent in", async () => {
+    const pizza = { name: "Pizza", amount: 100n, memberIds: [rahulM.id] };
+    const pasta = { name: "Pasta", amount: 100n, memberIds: [ashaM.id] };
+    for (const items of [[pizza, pasta], [pasta, pizza]]) {
+      const payers = [{ memberId: ashaM.id, value: 201n }];
+      const { id } = await createExpense(asha.id, input({ amount: 201n, payers, split: { method: "ITEMIZED", items, adjustments: [] } }));
+      expect(await sharesOf(id)).toEqual({ [ashaM.id]: 101n, [rahulM.id]: 100n });
+    }
+  });
+
   it("stores the group's currency and base amounts", async () => {
     const { id } = await createExpense(asha.id, input());
     const e = await db.expense.findUniqueOrThrow({ where: { id }, include: { payers: true, shares: true } });

@@ -79,7 +79,7 @@ async function splitFor(groupId: string, fields: ExpenseFields, currency: string
   const split = inGroupOrder(fields.split, rank);
   const payersError = checkPayers(fields.amount, fields.payers, currency);
   if (payersError) throw new UserError(payersError);
-  const result = splitExpense(fields.amount, split, currency);
+  const result = splitExpense(fields.amount, split, currency, members.map((m) => m.id));
   if (!result.ok) throw new UserError(result.error);
   return { split, shares: result.shares };
 }

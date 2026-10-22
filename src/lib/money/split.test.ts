@@ -46,6 +46,15 @@ describe("splits", () => {
     expect(shares(splitExpense(500n, { method: "ITEMIZED", items: [{ name: "Biryani", amount: 0n, memberIds: ["a"] }] }, "INR")))
       .toBe("Enter an amount for “Biryani”");
   });
+  it("itemised: the leftover paisa follows group order, not item order", () => {
+    const pizza = { name: "Pizza", amount: 100n, memberIds: ["r"] };
+    const pasta = { name: "Pasta", amount: 100n, memberIds: ["a"] };
+    for (const items of [[pizza, pasta], [pasta, pizza]]) {
+      const result = splitExpense(201n, { method: "ITEMIZED", items }, "INR", ["a", "r"]);
+      expect(shares(result)).toEqual({ a: 101n, r: 100n });
+      expect(result.ok && result.shares.map((s) => s.memberId)).toEqual(["a", "r"]);
+    }
+  });
   it("adjustments come off the top", () => {
     expect(shares(splitExpense(100000n, { method: "EQUAL", memberIds: ["a", "b", "c"], adjustments: [p("b", 10000n)] }, "INR")))
       .toEqual({ a: 30000n, b: 40000n, c: 30000n });
