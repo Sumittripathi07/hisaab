@@ -55,3 +55,15 @@ export const groupInputSchema = z.object({
 });
 
 export type GroupInput = z.output<typeof groupInputSchema>;
+
+/** Someone added by name, optionally with the email to invite. A blank email field means "no email". */
+export const placeholderSchema = z.object({
+  displayName: displayNameSchema,
+  email: z
+    .email()
+    .transform((email) => email.toLowerCase())
+    .optional()
+    .or(z.literal("").transform(() => undefined)),
+});
+
+export type PlaceholderInput = z.output<typeof placeholderSchema>;

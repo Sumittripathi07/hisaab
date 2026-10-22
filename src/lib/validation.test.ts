@@ -4,6 +4,7 @@ import {
   displayNameSchema,
   GROUP_COLORS,
   groupInputSchema,
+  placeholderSchema,
   profileSchema,
   timezoneSchema,
   upiIdSchema,
@@ -88,4 +89,20 @@ describe("groupInputSchema", () => {
   it("rejects an unknown currency", () => expect(() => groupInputSchema.parse({ ...valid, baseCurrency: "QQQ" })).toThrow());
   it("explains an empty name", () =>
     expect(groupInputSchema.safeParse({ ...valid, name: " " }).error?.issues[0].message).toBe("Enter a group name"));
+});
+
+describe("placeholderSchema", () => {
+  it("trims the name and lowercases the email", () =>
+    expect(placeholderSchema.parse({ displayName: " Rahul ", email: "Rahul@Example.TEST" })).toEqual({
+      displayName: "Rahul",
+      email: "rahul@example.test",
+    }));
+  it("treats an empty or missing email as none", () => {
+    expect(placeholderSchema.parse({ displayName: "Rahul", email: "" }).email).toBeUndefined();
+    expect(placeholderSchema.parse({ displayName: "Rahul" }).email).toBeUndefined();
+  });
+  it("rejects a malformed email and a blank name", () => {
+    expect(() => placeholderSchema.parse({ displayName: "Rahul", email: "rahul" })).toThrow();
+    expect(() => placeholderSchema.parse({ displayName: "  " })).toThrow();
+  });
 });
