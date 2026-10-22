@@ -18,6 +18,10 @@ const STALE = "That changed while you were doing it. Please try again.";
 // Placeholder emails are stored lowercased (addPlaceholder is the only writer); a user's email may not be, so it is lowercased
 // at the comparison point.
 
+/** The links people open, on the app's public origin: a group's invite link, and a placeholder's claim link. */
+export const inviteUrl = (code: string) => new URL(`/join/${code}`, env.BETTER_AUTH_URL).href;
+export const claimUrl = (token: string) => new URL(`/claim/${token}`, env.BETTER_AUTH_URL).href;
+
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 
 const isActiveMember = async (userId: string, groupId: string) =>
@@ -54,9 +58,8 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
     }
   }
 
-  const placeholder = await db.groupMember.create({
-    data: { groupId, displayName: input.displayName, email, claimToken: newClaimToken() },
-  });
+  const claimToken = newClaimToken();
+  const placeholder = await db.groupMember.create({ data: { groupId, displayName: input.displayName, email, claimToken } });
   if (!email) return placeholder;
 
   const inviter = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true } });
@@ -68,7 +71,7 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
       ...inviteEmail({
         inviterName: inviter.name,
         groupName: group.name,
-        claimUrl: new URL(`/claim/${placeholder.claimToken}`, env.BETTER_AUTH_URL).href,
+        claimUrl: claimUrl(claimToken),
       }),
     });
   } catch (error) {
@@ -79,18 +82,50 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
 }
 
 /**
+ * The rules for using an invite code, shared by joining and its preview so the two can't drift apart. An active member
+ * is let through even when the group is archived (they can still read it); anyone else is refused once it is.
+ */
+async function checkInvite(userId: string, code: string) {
+  const group = await db.group.findUnique({ where: { inviteCode: code } });
+  if (!group || group.type === "DIRECT") throw new NotFoundError("This invite link is invalid or has been reset.");
+  const existing = await db.groupMember.findUnique({ where: { groupId_userId: { groupId: group.id, userId } } });
+  const isMember = !!existing && !existing.leftAt;
+  if (!isMember && group.archivedAt) throw new UserError(ARCHIVED);
+  return { group, existing, isMember };
+}
+
+/** What the join page shows before anyone taps "Join group": refuses exactly what joining would, and writes nothing. */
+export async function getInvitePreview(
+  userId: string,
+  code: string,
+): Promise<
+  | { status: "member"; groupId: string }
+  | { status: "invite"; group: { name: string; emoji: string; color: string }; memberCount: number; memberNames: string[] }
+> {
+  const { group, isMember } = await checkInvite(userId, code);
+  if (isMember) return { status: "member", groupId: group.id };
+  const members = await db.groupMember.findMany({
+    where: { groupId: group.id, leftAt: null },
+    orderBy: [{ joinedAt: "asc" }, { id: "asc" }],
+    select: { displayName: true },
+  });
+  return {
+    status: "invite",
+    group: { name: group.name, emoji: group.emoji, color: group.color },
+    memberCount: members.length,
+    memberNames: members.slice(0, 3).map((m) => m.displayName.trim().split(/\s+/)[0]),
+  };
+}
+
+/**
  * Puts the person in the group the invite code belongs to. Safe to repeat: someone already in gets their group back
  * (even if it's archived, where they can still read it), someone who left gets their old row back, and someone a
  * placeholder was made for (same email) takes it over. Anyone not in the group is refused once it is archived.
  */
 export async function joinByInviteCode(userId: string, code: string): Promise<{ groupId: string }> {
-  const group = await db.group.findUnique({ where: { inviteCode: code } });
-  if (!group || group.type === "DIRECT") throw new NotFoundError("This invite link is invalid or has been reset.");
+  const { group, existing, isMember } = await checkInvite(userId, code);
   const groupId = group.id;
-
-  const existing = await db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
-  if (existing && !existing.leftAt) return { groupId };
-  if (group.archivedAt) throw new UserError(ARCHIVED);
+  if (isMember) return { groupId };
 
   try {
     if (existing) {
@@ -130,24 +165,40 @@ export async function rotateInviteCode(userId: string, groupId: string): Promise
   return inviteCode;
 }
 
-/** Takes over the placeholder a claim link points at. The token is spent in the same write, so it works once. */
-export async function claimPlaceholder(userId: string, token: string): Promise<{ groupId: string }> {
+/** The rules for using a claim link, shared by claiming and its preview so the two can't drift apart. */
+async function checkClaim(userId: string, token: string) {
   // A removed placeholder's link is dead too (leftAt), the same as a spent or reset one.
   const placeholder = await db.groupMember.findUnique({
     where: { claimToken: token, userId: null, leftAt: null },
-    include: { group: { select: { archivedAt: true } } },
+    include: { group: { select: { archivedAt: true, name: true, emoji: true, color: true } } },
   });
   if (!placeholder) throw new NotFoundError(USED_LINK);
   if (placeholder.group.archivedAt) throw new UserError(ARCHIVED);
-  const { groupId } = placeholder;
 
   const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, email: true } });
   if (placeholder.email && placeholder.email.toLowerCase() !== user.email.toLowerCase()) {
     throw new UserError("This invite was sent to a different email address.");
   }
-  const mine = await db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
+  const mine = await db.groupMember.findUnique({ where: { groupId_userId: { groupId: placeholder.groupId, userId } } });
   if (mine?.leftAt) throw new UserError("You were in this group before. Use the group's invite link to rejoin.");
   if (mine) throw new UserError("You're already in this group.");
+  return { placeholder, user };
+}
+
+/** What the claim page shows before anyone taps "Join group": refuses exactly what claiming would, and writes nothing. */
+export async function getClaimPreview(
+  userId: string,
+  token: string,
+): Promise<{ group: { name: string; emoji: string; color: string }; placeholderName: string }> {
+  const { placeholder } = await checkClaim(userId, token);
+  const { name, emoji, color } = placeholder.group;
+  return { group: { name, emoji, color }, placeholderName: placeholder.displayName };
+}
+
+/** Takes over the placeholder a claim link points at. The token is spent in the same write, so it works once. */
+export async function claimPlaceholder(userId: string, token: string): Promise<{ groupId: string }> {
+  const { placeholder, user } = await checkClaim(userId, token);
+  const { groupId } = placeholder;
 
   try {
     const claimed = await db.groupMember.updateMany({

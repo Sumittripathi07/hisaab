@@ -17,6 +17,8 @@ import { ForbiddenError, NotFoundError, UserError } from "@/server/errors";
 import {
   addPlaceholder,
   claimPlaceholder,
+  getClaimPreview,
+  getInvitePreview,
   joinByInviteCode,
   leaveGroup,
   regenerateClaimToken,
@@ -446,6 +448,132 @@ describe("claimPlaceholder", () => {
     const loser = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
     expect(loser.reason).toBeInstanceOf(UserError);
     expect(loser.reason).toHaveProperty("message", "You're already in this group.");
+  });
+});
+
+// The previews must refuse exactly what the real thing refuses, and change nothing.
+const outcome = (p: Promise<unknown>) =>
+  p.then(
+    () => "ok",
+    (e: Error) => `${e.name}: ${e.message}`,
+  );
+const everything = async () => ({
+  members: await db.groupMember.findMany({ orderBy: { id: "asc" } }),
+  groups: await db.group.findMany({ orderBy: { id: "asc" } }),
+});
+
+describe("getInvitePreview", () => {
+  it("shows the group, how many are in it and the first few first names, in the order they joined", async () => {
+    await memberWith("MEMBER", { name: "Ravi Kumar" });
+    await addMember(g.id, { displayName: "Neha" });
+    await memberWith("MEMBER", { name: "Kiran" });
+    const outsider = await createUser();
+    expect(await getInvitePreview(outsider.id, g.inviteCode)).toEqual({
+      status: "invite",
+      group: { name: "Goa Trip", emoji: g.emoji, color: g.color },
+      memberCount: 4,
+      memberNames: ["Asha", "Ravi", "Neha"],
+    });
+  });
+
+  it("leaves out people who left", async () => {
+    await addMember(g.id, { userId: (await createUser({ name: "Gone" })).id, leftAt: new Date() });
+    const outsider = await createUser();
+    expect(await getInvitePreview(outsider.id, g.inviteCode)).toMatchObject({ memberCount: 1, memberNames: ["Asha"] });
+  });
+
+  it("sends an active member to the group, even an archived one", async () => {
+    await archive();
+    expect(await getInvitePreview(asha.id, g.inviteCode)).toEqual({ status: "member", groupId: g.id });
+  });
+
+  it("refuses what joining refuses, with the same error, and writes nothing", async () => {
+    const outsider = await createUser({ email: "rahul@example.test" });
+    await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const { user: gone, member } = await memberWith("MEMBER");
+    await removeMember(asha.id, member.id);
+    const direct = await createGroup(asha.id, { type: "DIRECT" });
+    const cases: [string, string, () => Promise<unknown>][] = [
+      ["unknown code", outsider.id, async () => {}],
+      ["DIRECT group", outsider.id, async () => {}],
+      ["archived, outsider with a placeholder waiting", outsider.id, archive],
+      ["archived, someone who left", gone.id, async () => {}],
+    ];
+    const codes = ["nope", direct.inviteCode, g.inviteCode, g.inviteCode];
+    for (const [i, [label, userId, setup]] of cases.entries()) {
+      await setup();
+      const before = await everything();
+      const previewed = await outcome(getInvitePreview(userId, codes[i]));
+      expect(await everything(), label).toEqual(before);
+      expect(previewed, label).not.toBe("ok");
+      expect(previewed, label).toBe(await outcome(joinByInviteCode(userId, codes[i])));
+    }
+    expect(await outcome(getInvitePreview(outsider.id, "nope"))).toBe("NotFoundError: This invite link is invalid or has been reset.");
+  });
+
+  it("doesn't join, claim a waiting placeholder, or bring back someone who left", async () => {
+    await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const rahul = await createUser({ email: "rahul@example.test" });
+    const { user: gone, member } = await memberWith("MEMBER");
+    await removeMember(asha.id, member.id);
+    const before = await everything();
+    await getInvitePreview(rahul.id, g.inviteCode);
+    await getInvitePreview(gone.id, g.inviteCode);
+    expect(await everything()).toEqual(before);
+  });
+});
+
+describe("getClaimPreview", () => {
+  let rahul: User;
+  let p: GroupMember;
+  beforeEach(async () => {
+    p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    rahul = await createUser({ email: "Rahul@Example.test", name: "Rahul K" });
+  });
+
+  it("shows the group and the name they were added as, and changes nothing", async () => {
+    const before = await everything();
+    expect(await getClaimPreview(rahul.id, p.claimToken!)).toEqual({
+      group: { name: "Goa Trip", emoji: g.emoji, color: g.color },
+      placeholderName: "Rahul",
+    });
+    expect(await everything()).toEqual(before);
+  });
+
+  it("refuses what claiming refuses, with the same error, and writes nothing", async () => {
+    const reset = await addPlaceholder(asha.id, g.id, { displayName: "Reset" });
+    const oldToken = reset.claimToken!;
+    await regenerateClaimToken(asha.id, reset.id);
+    const removed = await addPlaceholder(asha.id, g.id, { displayName: "Removed" });
+    await removeMember(asha.id, removed.id);
+    const other = await createUser({ email: "someone.else@example.test" });
+    const { user: inAlready } = await memberWith("MEMBER", { email: "RAHUL@example.test" });
+    const left = await createUser({ email: "rahul@EXAMPLE.test" });
+    await addMember(g.id, { userId: left.id, leftAt: new Date() });
+
+    const cases: [string, string, string][] = [
+      ["unknown token", rahul.id, "nope"],
+      ["reset token", rahul.id, oldToken],
+      ["removed placeholder", rahul.id, removed.claimToken!],
+      ["different email", other.id, p.claimToken!],
+      ["already in", inAlready.id, p.claimToken!],
+      ["was in before", left.id, p.claimToken!],
+    ];
+    for (const [label, userId, token] of cases) {
+      const before = await everything();
+      const previewed = await outcome(getClaimPreview(userId, token));
+      expect(await everything(), label).toEqual(before);
+      expect(previewed, label).not.toBe("ok");
+      expect(previewed, label).toBe(await outcome(claimPlaceholder(userId, token)));
+    }
+    await archive();
+    expect(await outcome(getClaimPreview(rahul.id, p.claimToken!))).toBe(`UserError: ${ARCHIVED}`);
+    expect(await outcome(claimPlaceholder(rahul.id, p.claimToken!))).toBe(`UserError: ${ARCHIVED}`);
+  });
+
+  it("refuses a link that was already used", async () => {
+    await claimPlaceholder(rahul.id, p.claimToken!);
+    expect(await outcome(getClaimPreview(rahul.id, p.claimToken!))).toBe(`NotFoundError: ${USED_LINK}`);
   });
 });
 

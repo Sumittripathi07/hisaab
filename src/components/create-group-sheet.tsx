@@ -1,25 +1,16 @@
 "use client";
 
-import { XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createContext, use, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { createContext, use, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { GroupForm } from "@/components/group-form";
+import { ResponsiveSheet } from "@/components/responsive-sheet";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import type { CurrencyOptions } from "@/lib/currency";
 import type { GroupInput } from "@/lib/validation";
 import { createGroupAction } from "@/server/actions/groups";
 
 const SetOpen = createContext<(open: boolean) => void>(() => {});
-
-const DESKTOP = "(min-width: 768px)";
-const subscribe = (onChange: () => void) => {
-  const query = matchMedia(DESKTOP);
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-};
 
 const TITLE = "New group";
 const DESCRIPTION = "Name it and give it a look. You can add people next.";
@@ -36,7 +27,6 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
-  const desktop = useSyncExternalStore(subscribe, () => matchMedia(DESKTOP).matches, () => false);
 
   async function create(values: GroupInput) {
     const result = await createGroupAction(values);
@@ -49,48 +39,19 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
     return result;
   }
 
-  const form = (
-    <GroupForm
-      currencies={currencies}
-      defaultValues={{ baseCurrency: defaultCurrency }}
-      submitLabel="Create group"
-      onSubmit={create}
-      nameInputRef={nameRef}
-    />
-  );
-
   return (
     <SetOpen value={setOpen}>
       {children}
-      {desktop ? (
-        <Dialog open={open} onOpenChange={setOpen}>
-          {/* Both open with the name field focused (the drawer would otherwise focus itself). */}
-          <DialogContent initialFocus={nameRef} className="flex max-h-[calc(100dvh-4rem)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-lg">
-            <DialogHeader className="gap-1 p-6 pb-4">
-              <DialogTitle className="text-xl font-semibold">{TITLE}</DialogTitle>
-              <DialogDescription>{DESCRIPTION}</DialogDescription>
-            </DialogHeader>
-            <div className="min-h-0 overflow-y-auto overscroll-contain px-6 pt-1">{form}</div>
-          </DialogContent>
-        </Dialog>
-      ) : (
-        <Drawer open={open} onOpenChange={setOpen} showSwipeHandle>
-          <DrawerContent initialFocus={nameRef} className="rounded-t-3xl">
-            <DrawerHeader className="gap-1 pb-4">
-              <DrawerTitle className="text-xl font-semibold">{TITLE}</DrawerTitle>
-              <DrawerDescription>{DESCRIPTION}</DrawerDescription>
-            </DrawerHeader>
-            {/* Swiping and the backdrop aren't available to screen readers or switch access; this is. */}
-            <DrawerClose
-              render={<Button variant="ghost" size="icon" className="absolute top-3 right-3 size-9 rounded-full text-muted-foreground" />}
-              aria-label="Close"
-            >
-              <XIcon className="size-5" aria-hidden />
-            </DrawerClose>
-            <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pt-1">{form}</div>
-          </DrawerContent>
-        </Drawer>
-      )}
+      {/* Opens with the name field focused. */}
+      <ResponsiveSheet open={open} onOpenChange={setOpen} title={TITLE} description={DESCRIPTION} initialFocus={nameRef}>
+        <GroupForm
+          currencies={currencies}
+          defaultValues={{ baseCurrency: defaultCurrency }}
+          submitLabel="Create group"
+          onSubmit={create}
+          nameInputRef={nameRef}
+        />
+      </ResponsiveSheet>
     </SetOpen>
   );
 }

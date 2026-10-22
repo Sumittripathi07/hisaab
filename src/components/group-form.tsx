@@ -23,10 +23,15 @@ type Props = {
   onSubmit: (values: GroupInput) => Promise<ActionResult<unknown>>;
   /** The name input, for a sheet to focus when it opens. */
   nameInputRef?: React.RefObject<HTMLInputElement | null>;
+  /**
+   * "sheet" (default) keeps the submit button stuck to the bottom of the scrolling sheet. "inline" leaves it at the end of
+   * the form, for a page, where a stuck bar would sit under the phone's bottom nav.
+   */
+  variant?: "sheet" | "inline";
 };
 
 /** A group's name, look and settings. Create and settings share it; the caller decides what success means. */
-export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, nameInputRef }: Props) {
+export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, nameInputRef, variant = "sheet" }: Props) {
   const [values, setValues] = useState<GroupInput>(() => {
     const type = defaultValues?.type ?? "OTHER";
     return {
@@ -219,8 +224,14 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, na
         />
       </label>
 
-      {/* Stays in reach while the fields scroll underneath, in a sheet or on a long page. */}
-      <div className="sticky bottom-0 bg-popover pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-popover">
+      {/* In a sheet, stays in reach while the fields scroll underneath. */}
+      <div
+        className={
+          variant === "sheet"
+            ? "sticky bottom-0 bg-popover pt-2 pb-[max(1rem,env(safe-area-inset-bottom))] before:pointer-events-none before:absolute before:inset-x-0 before:-top-6 before:h-6 before:bg-linear-to-t before:from-popover"
+            : "pt-2"
+        }
+      >
         <Button type="submit" className="h-12 w-full rounded-xl text-base" disabled={pending || saved === values}>
           {pending && <LoaderCircle className="animate-spin" aria-hidden />}
           {submitLabel}
