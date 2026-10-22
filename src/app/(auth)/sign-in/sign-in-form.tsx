@@ -7,15 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { authClient } from "@/lib/auth-client";
-
-const EXPIRED = "That sign-in link has expired or was already used. Send yourself a new one below.";
-const GOOGLE_CANCELLED = "Google sign-in was cancelled. Try again, or email yourself a sign-in link below.";
-const RATE_LIMITED = "Too many links requested. Try again in an hour, or continue with Google.";
-const FAILED = "Something went wrong. Check your connection and try again.";
-
-/** The banner for an `error` query param Better Auth sent us back with. */
-const bannerFor = (error: string | undefined) =>
-  !error ? null : error === "access_denied" ? GOOGLE_CANCELLED : EXPIRED;
+import { bannerFor, FAILED, magicLinkFailure } from "./banners";
 
 export function SignInForm({ callbackURL, error }: { callbackURL: string; error?: string }) {
   const [email, setEmail] = useState("");
@@ -49,7 +41,7 @@ export function SignInForm({ callbackURL, error }: { callbackURL: string; error?
     setPending("email");
     try {
       const res = await authClient.signIn.magicLink({ email: address, ...urls });
-      if (res.error) setBanner(res.error.status === 429 ? RATE_LIMITED : FAILED);
+      if (res.error) setBanner(magicLinkFailure(res.error));
       else setSentTo(address);
     } catch {
       setBanner(FAILED);

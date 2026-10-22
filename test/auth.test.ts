@@ -146,4 +146,41 @@ describe("over HTTP (the route handler)", () => {
     expect(res.status).toBe(429);
     expect(await res.json()).toMatchObject({ code: "EMAIL_RATE_LIMITED" });
   });
+
+  it("has no /update-user, so a signed-in person can't set a name or image that skips our validation", async () => {
+    const signedIn = await verify(await requestLink("asha@example.test"));
+    const cookie = signedIn.headers.get("set-cookie")!.match(/better-auth\.session_token=[^;]+/)![0];
+    const headers = { "content-type": "application/json", origin, cookie };
+    // The cookie is a live session, so a refusal below is the closed path, not a missing sign-in.
+    const session = await auth.handler(new Request(`${origin}/api/auth/get-session`, { headers }));
+    expect(await session.json()).toMatchObject({ user: { email: "asha@example.test" } });
+
+    for (const path of ["/api/auth/update-user", "/api/auth/update-user/"]) {
+      const res = await auth.handler(
+        new Request(`${origin}${path}`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ name: "x".repeat(500), image: "https://tracker.example/pixel.gif" }),
+        }),
+      );
+      expect(res.status).toBe(404);
+    }
+    expect(await db.user.findFirstOrThrow({ where: { email: "asha@example.test" } })).toMatchObject({ name: "", image: null });
+  });
+});
+
+describe("Google sign-in failures", () => {
+  const origin = "http://localhost:3000";
+
+  it("sends a callback it can't match to a sign-in attempt back to /sign-in, not Better Auth's error page", async () => {
+    const res = await auth.handler(new Request(`${origin}/api/auth/callback/google?state=forged&code=x`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toMatch(/^\/sign-in\?error=state/);
+  });
+
+  it("forwards Better Auth's own error page to /sign-in", async () => {
+    const res = await auth.handler(new Request(`${origin}/api/auth/error?error=access_denied`));
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe("/sign-in?error=access_denied");
+  });
 });
