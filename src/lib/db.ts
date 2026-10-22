@@ -8,7 +8,8 @@ const globalForDb = globalThis as unknown as { db?: PrismaClient };
 export const db =
   globalForDb.db ??
   new PrismaClient({
-    adapter: new PrismaPg({ connectionString: env.DATABASE_URL, max: 5 }),
+    // A bounded connect, so an unreachable database fails fast (/api/health answers 503) instead of hanging the request.
+    adapter: new PrismaPg({ connectionString: env.DATABASE_URL, max: 5, connectionTimeoutMillis: 5_000 }),
   });
 
 // Reuse one client across dev hot reloads so we don't leak pools.

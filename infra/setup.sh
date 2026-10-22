@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # Idempotent GCP + GitHub provisioning for Hisaab. Every step checks first and skips what exists.
-# Usage: BILLING_ACCOUNT=XXXXXX-XXXXXX-XXXXXX bash infra/setup.sh
+# Usage: bash infra/setup.sh (the project must already exist with billing enabled)
 # PROJECT_ID is a shared umbrella project for personal apps, so every resource here is hisaab-prefixed
 # and the WIF pool trusts the whole GitHub owner; each app binds its own repo to its own deployer SA.
 # Never changes gcloud's global config: every gcloud call passes --project explicitly.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-: "${BILLING_ACCOUNT:?BILLING_ACCOUNT must be set}"
 # shellcheck source=config.env
 source infra/config.env
 
@@ -23,13 +22,23 @@ step() { echo "$1: creating"; }
 # IAM is eventually consistent: a just-created service account can briefly be "not found".
 retry() { for i in 1 2 3 4 5 6; do "$@" && return; echo "retrying in 10s ($i)"; sleep 10; done; return 1; }
 
-# --- Project + billing
-if gcloud projects describe "$PROJECT_ID" "${P[@]}" >/dev/null 2>&1; then skip "project $PROJECT_ID"
-else step "project $PROJECT_ID"; gcloud projects create "$PROJECT_ID" "${P[@]}"; fi
+# --- Preflight (read-only). The project is shared by other apps: never create it or change its billing.
+die() { echo "ERROR: $*" >&2; exit 1; }
+gcloud projects describe "$PROJECT_ID" "${P[@]}" >/dev/null 2>&1 ||
+  die "project $PROJECT_ID not found or not accessible; create it in the console first"
+[[ $(gcloud billing projects describe "$PROJECT_ID" "${P[@]}" --format='value(billingEnabled)') == True ]] ||
+  die "billing is not enabled on $PROJECT_ID; link billing in the console first"
+echo "preflight: project $PROJECT_ID exists, billing enabled"
 
-if [[ $(gcloud billing projects describe "$PROJECT_ID" "${P[@]}" --format='value(billingAccountName)') == "billingAccounts/$BILLING_ACCOUNT" ]]; then
-  skip "billing link"
-else step "billing link"; gcloud billing projects link "$PROJECT_ID" --billing-account="$BILLING_ACCOUNT" "${P[@]}"; fi
+has_version() { [[ -n $(gcloud secrets versions list "$1" --limit=1 --format='value(name)' "${P[@]}") ]]; }
+# Owner-managed secrets: Sumit adds these (values never pass through this script or chat). This script only grants
+# access to them, so fail early and clearly if one is missing rather than half-way through the IAM steps.
+OWNER_SECRETS=(HISAAB_GOOGLE_CLIENT_ID HISAAB_GOOGLE_CLIENT_SECRET HISAAB_SMTP_URL)
+for s in "${OWNER_SECRETS[@]}"; do
+  has_version "$s" 2>/dev/null ||
+    die "secret $s is missing or has no version; add it first (README: Secrets), then re-run"
+done
+echo "preflight: ${OWNER_SECRETS[*]} exist"
 
 # --- APIs
 enabled=$(gcloud services list --enabled "${P[@]}" --format='value(config.name)')
@@ -49,8 +58,17 @@ else
   step "sql instance $INSTANCE"
   op=$(gcloud sql instances create "$INSTANCE" --database-version=POSTGRES_16 --edition=ENTERPRISE \
     --tier=db-f1-micro --region="$REGION" --storage-type=SSD --storage-size=10 \
-    --backup-start-time=20:30 --enable-point-in-time-recovery --async --format='value(name)' "${P[@]}")
+    --backup-start-time=20:30 --enable-point-in-time-recovery --deletion-protection --async --format='value(name)' "${P[@]}")
   gcloud sql operations wait "$op" --timeout=unlimited "${P[@]}"
+fi
+
+# Production data: the instance can't be deleted until this is turned off on purpose. Also covers an instance made
+# before the create flag above existed.
+if [[ $(gcloud sql instances describe "$INSTANCE" "${P[@]}" --format='value(settings.deletionProtectionEnabled)') == True ]]; then
+  skip "sql instance $INSTANCE deletion protection"
+else
+  echo "sql instance $INSTANCE deletion protection: enabling"
+  gcloud sql instances patch "$INSTANCE" --deletion-protection --quiet "${P[@]}"
 fi
 
 if gcloud sql databases describe hisaab --instance="$INSTANCE" "${P[@]}" >/dev/null 2>&1; then skip "database hisaab"
@@ -61,7 +79,6 @@ for s in HISAAB_DATABASE_URL HISAAB_BETTER_AUTH_SECRET; do
   if gcloud secrets describe "$s" "${P[@]}" >/dev/null 2>&1; then skip "secret $s"
   else step "secret $s"; gcloud secrets create "$s" --replication-policy=automatic "${P[@]}"; fi
 done
-has_version() { [[ -n $(gcloud secrets versions list "$1" --limit=1 --format='value(name)' "${P[@]}") ]]; }
 
 # The SQL user's password and the HISAAB_DATABASE_URL version are always written together from one
 # generated value, so they never drift apart. Postgres users can't be created without a password.
@@ -115,6 +132,7 @@ bind projects "$PROJECT_ID" "serviceAccount:$DEPLOYER_SA" roles/artifactregistry
 # Secret access is per secret, not project-wide: other apps' secrets live in this project too.
 bind secrets HISAAB_DATABASE_URL "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
 bind secrets HISAAB_BETTER_AUTH_SECRET "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
+for s in "${OWNER_SECRETS[@]}"; do bind secrets "$s" "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor; done
 bind "iam service-accounts" "$RUN_SA" "serviceAccount:$DEPLOYER_SA" roles/iam.serviceAccountUser
 
 # --- Workload Identity Federation for GitHub Actions

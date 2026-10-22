@@ -6,3 +6,153 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+enum GroupType {
+  TRIP
+  HOME
+  COUPLE
+  EVENT
+  OTHER
+  DIRECT
+}
+
+enum MemberRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+model Group {
+  id            String    @id @default(cuid())
+  name          String
+  emoji         String
+  color         String
+  type          GroupType
+  baseCurrency  String
+  simplifyDebts Boolean   @default(true)
+  inviteCode    String    @unique
+  archivedAt    DateTime?
+  /// Restrict: a user who created groups can't be deleted out from under the people in them.
+  createdById   String
+  createdBy     User      @relation(fields: [createdById], references: [id])
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  members GroupMember[]
+}
+
+/// One row per person in a group. `userId` is null for a placeholder (someone not on Hisaab yet).
+/// Leaving sets `leftAt`; the row stays so past expenses keep their names.
+model GroupMember {
+  id          String     @id @default(cuid())
+  groupId     String
+  group       Group      @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  /// SetNull: deleting an account turns the member into a placeholder, so the group's history survives.
+  userId      String?
+  user        User?      @relation(fields: [userId], references: [id], onDelete: SetNull)
+  displayName String
+  email       String?
+  role        MemberRole @default(MEMBER)
+  claimToken  String?    @unique
+  joinedAt    DateTime   @default(now())
+  leftAt      DateTime?
+  createdAt   DateTime   @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+/// One row per email sent (or attempted). Rate limits count these rows.
+model EmailLog {
+  id           String   @id @default(cuid())
+  kind         String
+  toEmail      String
+  senderUserId String?
+  createdAt    DateTime @default(now())
+
+  @@index([kind, toEmail, createdAt])
+  @@index([kind, senderUserId, createdAt])
+  @@index([createdAt])
+}
+
+// Better Auth models (its documented schema). Better Auth generates the string ids itself,
+// and expects the delegates user, session, account, verification and rateLimit.
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  /// Our additions, declared in auth.ts `user.additionalFields` with `input: false`.
+  defaultCurrency String    @default("INR")
+  upiId           String?
+  timezone        String    @default("Asia/Kolkata")
+  onboardedAt     DateTime?
+
+  sessions      Session[]
+  accounts      Account[]
+  createdGroups Group[]
+  memberships   GroupMember[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+
+  @@map("rateLimit")
+}
