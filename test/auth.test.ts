@@ -70,6 +70,17 @@ describe("magic link", () => {
     expect(user).toMatchObject({ defaultCurrency: "INR", timezone: "Asia/Kolkata", upiId: null, onboardedAt: null });
   });
 
+  // The body's `name` is set by whoever calls the API, not our form, and lands in user.name at sign-up.
+  it.each([
+    ["‮gnp.exe\r\nBcc: x ", "gnp.exeBcc: x"],
+    ["x".repeat(500), ""],
+    ["⁦\u0007", ""],
+  ])("puts a sign-up name through the display name rules (%#)", async (name, stored) => {
+    await auth.api.signInMagicLink({ body: { email: "asha@example.test", name, callbackURL: "/dashboard" }, headers: new Headers() });
+    await verify(new URL((await lastEmailTo("asha@example.test")).text.match(/https?:\/\/\S+/)![0]));
+    expect(await db.user.findFirstOrThrow()).toMatchObject({ email: "asha@example.test", name: stored });
+  });
+
   it("carries the new-user, error and callback URLs through the link", async () => {
     const link = await requestLink("asha@example.test", {
       callbackURL: "/join/abc",

@@ -131,3 +131,30 @@ describe.each([
     expect(await snapshot()).toEqual(before);
   });
 });
+
+// Pages send people who haven't onboarded there first; the actions must too, or a sign-up name that onboarding never
+// checked could be copied onto a membership by a direct call.
+describe("before onboarding", () => {
+  const toOnboarding = { digest: expect.stringContaining(";/onboarding;") };
+  beforeEach(() => void (session.user = { ...session.user!, onboardedAt: null }));
+
+  it.each((Object.keys(table) as ActionName[]).filter((name) => name !== "completeOnboardingAction"))(
+    "%s sends them to onboarding and changes nothing",
+    async (name) => {
+      const before = await snapshot();
+      for (const call of table[name].calls(target)) await expect(call()).rejects.toMatchObject(toOnboarding);
+      expect(await snapshot()).toEqual(before);
+    },
+  );
+
+  it("won't let them join a group, even with its real invite code", async () => {
+    await expect(actions.joinByInviteCodeAction({ code: target.inviteCode })).rejects.toMatchObject(toOnboarding);
+    expect(await db.groupMember.count({ where: { userId: outsider.id } })).toBe(1); // only their own group
+  });
+
+  it("still lets them finish onboarding", async () => {
+    const input = { name: "Mallory", defaultCurrency: "INR", upiId: "", timezone: "UTC" };
+    expect(await actions.completeOnboardingAction(input)).toEqual({ ok: true, data: undefined });
+    expect((await db.user.findUniqueOrThrow({ where: { id: outsider.id } })).onboardedAt).not.toBeNull();
+  });
+});

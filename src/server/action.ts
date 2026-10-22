@@ -1,4 +1,4 @@
-import { unstable_rethrow } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import { z } from "zod";
 import { ForbiddenError, NotFoundError, UserError } from "@/server/errors";
 import { requireUser, type SessionUser } from "@/server/session";
@@ -8,14 +8,20 @@ export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string
 /**
  * Wraps a server action: signs the caller in, validates `input` against `schema`, runs `handler`,
  * and turns thrown errors into `{ ok: false, error }` so the client never sees a stack trace.
+ *
+ * Someone who hasn't finished onboarding is sent there, like every page but onboarding does, unless the action is part
+ * of it (`beforeOnboarding`). Until then their name is whatever sign-up gave, maybe blank, and joining a group would
+ * copy it onto their membership.
  */
 export function defineAction<S extends z.ZodType, R>(
   schema: S,
   handler: (input: z.output<S>, user: SessionUser) => Promise<R>,
+  { beforeOnboarding = false } = {},
 ): (input: z.input<S>) => Promise<ActionResult<R>> {
   return async (input) => {
     try {
       const user = await requireUser();
+      if (!user.onboardedAt && !beforeOnboarding) redirect("/onboarding");
       const parsed: z.output<S> = await schema.parseAsync(input);
       return { ok: true, data: await handler(parsed, user) };
     } catch (error) {

@@ -6,6 +6,7 @@ import {
   groupInputSchema,
   placeholderSchema,
   profileSchema,
+  signUpName,
   timezoneSchema,
   upiIdSchema,
 } from "@/lib/validation";
@@ -22,6 +23,17 @@ describe("validation", () => {
   it("rejects whitespace-only names", () => expect(() => displayNameSchema.parse("   ")).toThrow());
   it("rejects names over 40 characters", () => expect(() => displayNameSchema.parse("a".repeat(41))).toThrow());
   it("accepts emoji names", () => expect(displayNameSchema.parse(" Priya 🌸 ")).toBe("Priya 🌸"));
+  it("keeps the joiners inside emoji sequences", () => expect(displayNameSchema.parse("Asha 👨‍👩‍👧")).toBe("Asha 👨‍👩‍👧"));
+  it("strips control and bidi characters before trimming and counting", () => {
+    expect(displayNameSchema.parse("‮Asha\r\nBcc: x⁦\u0000 ")).toBe("AshaBcc: x");
+    expect(() => displayNameSchema.parse("‏\n ")).toThrow();
+    expect(displayNameSchema.parse(`${"a".repeat(40)}‮`)).toBe("a".repeat(40));
+  });
+  it("blanks a sign-up name the rules refuse, for onboarding to ask", () => {
+    expect(signUpName(" ‮Asha ")).toBe("Asha");
+    expect(signUpName("a".repeat(41))).toBe("");
+    expect(signUpName("")).toBe("");
+  });
   it("accepts real timezones and UTC", () => {
     expect(timezoneSchema.parse("Asia/Kolkata")).toBe("Asia/Kolkata");
     expect(timezoneSchema.parse("UTC")).toBe("UTC");
