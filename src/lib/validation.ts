@@ -41,3 +41,17 @@ export const profileSchema = z.object({
 });
 
 export type ProfileInput = z.output<typeof profileSchema>;
+
+export const GROUP_COLORS = ["emerald", "sky", "violet", "rose", "amber", "teal", "indigo", "orange"] as const;
+
+// Users pick one of these; DIRECT (the two-person group Phase 4 makes for friends) is created by code, never by a form.
+export const groupInputSchema = z.object({
+  name: z.string().trim().min(1, "Enter a group name").max(60, "Group name must be 60 characters or fewer"),
+  emoji: z.string().trim().min(1, "Pick an emoji").max(16, "Pick a single emoji").default("👥"),
+  color: z.enum(GROUP_COLORS).default("emerald"),
+  type: z.enum(["TRIP", "HOME", "COUPLE", "EVENT", "OTHER"]),
+  baseCurrency: currencySchema,
+  simplifyDebts: z.boolean().default(true),
+});
+
+export type GroupInput = z.output<typeof groupInputSchema>;

@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { currencySchema, displayNameSchema, profileSchema, timezoneSchema, upiIdSchema } from "@/lib/validation";
+import {
+  currencySchema,
+  displayNameSchema,
+  GROUP_COLORS,
+  groupInputSchema,
+  profileSchema,
+  timezoneSchema,
+  upiIdSchema,
+} from "@/lib/validation";
 
 describe("validation", () => {
   it("trims and lowercases UPI IDs", () => expect(upiIdSchema.parse("  Sumit.T@OkAxis ")).toBe("sumit.t@okaxis"));
@@ -33,4 +41,51 @@ describe("validation", () => {
       upiId: null,
       timezone: "Asia/Kolkata",
     }));
+});
+
+describe("groupInputSchema", () => {
+  const valid = { name: "Goa Trip", type: "TRIP", baseCurrency: "INR" };
+
+  it("fills in the emoji, colour and simplify defaults", () =>
+    expect(groupInputSchema.parse(valid)).toEqual({
+      name: "Goa Trip",
+      emoji: "👥",
+      color: "emerald",
+      type: "TRIP",
+      baseCurrency: "INR",
+      simplifyDebts: true,
+    }));
+  it("keeps what the person chose", () =>
+    expect(groupInputSchema.parse({ ...valid, emoji: "🏖️", color: "rose", simplifyDebts: false })).toMatchObject({
+      emoji: "🏖️",
+      color: "rose",
+      simplifyDebts: false,
+    }));
+  it("trims the name and uppercases the currency", () =>
+    expect(groupInputSchema.parse({ ...valid, name: "  Goa Trip ", baseCurrency: "inr" })).toMatchObject({
+      name: "Goa Trip",
+      baseCurrency: "INR",
+    }));
+  it("rejects the DIRECT type from user input", () => expect(() => groupInputSchema.parse({ ...valid, type: "DIRECT" })).toThrow());
+  it("rejects an unknown type", () => expect(() => groupInputSchema.parse({ ...valid, type: "PARTY" })).toThrow());
+  it("rejects whitespace-only and empty names", () => {
+    expect(() => groupInputSchema.parse({ ...valid, name: "   " })).toThrow();
+    expect(() => groupInputSchema.parse({ ...valid, name: "" })).toThrow();
+  });
+  it("rejects names over 60 characters", () => {
+    expect(() => groupInputSchema.parse({ ...valid, name: "a".repeat(61) })).toThrow();
+    expect(groupInputSchema.parse({ ...valid, name: "a".repeat(60) }).name).toHaveLength(60);
+  });
+  it("rejects unknown colours and accepts every listed one", () => {
+    expect(() => groupInputSchema.parse({ ...valid, color: "chartreuse" })).toThrow();
+    for (const color of GROUP_COLORS) expect(groupInputSchema.parse({ ...valid, color }).color).toBe(color);
+  });
+  it("rejects a blank or over-long emoji", () => {
+    expect(() => groupInputSchema.parse({ ...valid, emoji: "" })).toThrow();
+    expect(() => groupInputSchema.parse({ ...valid, emoji: "   " })).toThrow();
+    expect(() => groupInputSchema.parse({ ...valid, emoji: "x".repeat(17) })).toThrow();
+  });
+  it("rejects an unknown currency", () => expect(() => groupInputSchema.parse({ ...valid, baseCurrency: "QQQ" })).toThrow());
+  it("explains an empty name", () =>
+    expect(groupInputSchema.safeParse({ ...valid, name: " " }).error?.issues[0].message).toBe("Enter a group name"));
 });
