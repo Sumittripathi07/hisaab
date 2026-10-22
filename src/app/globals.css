@@ -48,6 +48,15 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  /* A one-off hello for the dashboard's 👋. Use it as motion-safe:animate-wave. */
+  --animate-wave: wave 1.8s ease-in-out 0.4s 1;
+  @keyframes wave {
+    0%, 60%, 100% { rotate: 0deg; }
+    10%, 30% { rotate: 14deg; }
+    20% { rotate: -8deg; }
+    40% { rotate: -4deg; }
+    50% { rotate: 10deg; }
+  }
 }
 
 :root {

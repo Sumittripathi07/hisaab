@@ -14,3 +14,14 @@ export async function signInWithMagicLink(page: Page, email: string): Promise<vo
   if (!link) throw new Error(`No sign-in link in the email to ${email}`);
   await page.goto(link);
 }
+
+/** Signs in as someone new and finishes onboarding with just a name, landing on the dashboard. */
+export async function signInAndOnboard(page: Page, email: string, name: string): Promise<void> {
+  await signInWithMagicLink(page, email);
+  await expect(page).toHaveURL(/\/onboarding/);
+  await page.getByLabel("Your name").fill(name);
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Go to dashboard" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+}

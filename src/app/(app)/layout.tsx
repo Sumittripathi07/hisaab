@@ -1,23 +1,24 @@
-import Link from "next/link";
-import { UserAvatar } from "@/components/user-avatar";
+import { BottomNav } from "@/components/app-shell/bottom-nav";
+import { Fab } from "@/components/app-shell/fab";
+import { Sidebar } from "@/components/app-shell/sidebar";
+import { CreateGroupProvider } from "@/components/create-group-sheet";
+import { currencyOptions } from "@/lib/currency";
 import { requireOnboardedUser } from "@/server/session";
 
-// Minimal shell until the real one (bottom nav / sidebar) lands with groups.
+/** Sidebar from 768px up; below that, a bottom nav with a "+" button floating above it. */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireOnboardedUser();
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-10 border-b bg-background/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4">
-          <Link href="/dashboard" className="rounded-md text-lg font-semibold tracking-tight outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-            Hisaab<span className="text-primary">.</span>
-          </Link>
-          <Link href="/account" aria-label="Account" className="rounded-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50">
-            <UserAvatar name={user.name} image={user.image} size="sm" />
-          </Link>
-        </div>
-      </header>
-      <main className="mx-auto w-full max-w-5xl flex-1 px-4 py-6 sm:py-10">{children}</main>
-    </div>
+    <CreateGroupProvider currencies={currencyOptions(user.defaultCurrency)} defaultCurrency={user.defaultCurrency}>
+      <div className="flex min-h-dvh">
+        <Sidebar user={{ name: user.name, email: user.email, image: user.image }} />
+        {/* On phones, room at the bottom for the nav and the button, so neither ever covers the last card. */}
+        <main className="min-w-0 flex-1 px-4 pt-6 pb-[calc(9rem+env(safe-area-inset-bottom))] sm:px-6 md:px-10 md:py-10">
+          <div className="mx-auto w-full max-w-5xl">{children}</div>
+        </main>
+      </div>
+      <BottomNav />
+      <Fab />
+    </CreateGroupProvider>
   );
 }

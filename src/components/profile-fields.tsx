@@ -3,7 +3,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select";
 import type { CurrencyOptions } from "@/lib/currency";
 
-// Shared by onboarding and the account page.
+// Shared by onboarding, the account page and the group form.
 
 export const NETWORK_ERROR = "Couldn't reach Hisaab. Check your connection and try again.";
 
@@ -42,17 +42,25 @@ export function NameField({ value, onChange, error, ref, autoFocus }: FieldProps
   );
 }
 
-export function CurrencyField({ value, onChange, options }: Omit<FieldProps<string>, "error" | "ref"> & { options: CurrencyOptions }) {
+/** The person's default currency unless told otherwise; the group form reuses it for a group's currency. */
+export function CurrencyField({
+  value,
+  onChange,
+  options,
+  id = "defaultCurrency",
+  label = "Default currency",
+  hint = "New groups start in this currency.",
+}: Omit<FieldProps<string>, "error" | "ref"> & { options: CurrencyOptions; id?: string; label?: string; hint?: string }) {
   return (
     <Field>
-      <FieldLabel htmlFor="defaultCurrency">Default currency</FieldLabel>
+      <FieldLabel htmlFor={id}>{label}</FieldLabel>
       <NativeSelect
-        id="defaultCurrency"
-        name="defaultCurrency"
+        id={id}
+        name={id}
         className="w-full [&>select]:h-12 [&>select]:rounded-xl [&>select]:pl-3.5 [&>select]:text-base"
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        aria-describedby="defaultCurrency-hint"
+        aria-describedby={`${id}-hint`}
       >
         <NativeSelectOptGroup label="Popular">
           {options.common.map((o) => (
@@ -69,7 +77,7 @@ export function CurrencyField({ value, onChange, options }: Omit<FieldProps<stri
           ))}
         </NativeSelectOptGroup>
       </NativeSelect>
-      <FieldDescription id="defaultCurrency-hint">New groups start in this currency.</FieldDescription>
+      <FieldDescription id={`${id}-hint`}>{hint}</FieldDescription>
     </Field>
   );
 }

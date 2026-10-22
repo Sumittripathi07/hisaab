@@ -24,4 +24,11 @@ describe("currencyOptions", () => {
     expect(rest.some((o) => o.code === "INR")).toBe(false);
     expect(rest.some((o) => o.code === "BRL")).toBe(true);
   });
+
+  it("can put one currency (the person's default) first without listing it twice", () => {
+    const { common, rest } = currencyOptions("NPR");
+    expect(common.map((o) => o.code).slice(0, 2)).toEqual(["NPR", "INR"]);
+    expect(rest.some((o) => o.code === "NPR")).toBe(false);
+    expect(currencyOptions("USD").common.filter((o) => o.code === "USD")).toHaveLength(1);
+  });
 });

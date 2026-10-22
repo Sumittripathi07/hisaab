@@ -1,22 +1,18 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Check, Link2, LoaderCircle, Plus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, LoaderCircle, Plus } from "lucide-react";
 import { AnimatePresence, MotionConfig, motion, type Variants } from "motion/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { bigInput, CurrencyField, firstError, NameField, NETWORK_ERROR, UpiIdField } from "@/components/profile-fields";
+import { JoinWithLink } from "@/components/join-with-link";
+import { CurrencyField, firstError, NameField, NETWORK_ERROR, UpiIdField } from "@/components/profile-fields";
 import { Button } from "@/components/ui/button";
-import { Field, FieldError, FieldLabel } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
 import { UserAvatar } from "@/components/user-avatar";
 import { currencyForLocale, type CurrencyOptions } from "@/lib/currency";
-import { inviteCodeFrom } from "@/lib/invite-code";
 import { cn } from "@/lib/utils";
 import { displayNameSchema, timezoneSchema, upiIdSchema } from "@/lib/validation";
 import { completeOnboardingAction } from "@/server/actions/profile";
-
-const BAD_INVITE = "Paste the invite link a friend sent you, or just its code.";
 
 // Steps slide in the direction of travel. MotionConfig below turns the slide into a plain fade for reduced motion.
 const slide: Variants = {
@@ -187,7 +183,6 @@ export function OnboardingFlow({ user, currencies, callbackURL, showWelcome }: P
                   focus={moved}
                   total={total}
                   onCreate={() => router.push("/dashboard?new=1")}
-                  onJoin={(code) => router.push(`/join/${code}`)}
                   onDashboard={() => router.push(callbackURL)}
                 />
               )}
@@ -199,25 +194,13 @@ export function OnboardingFlow({ user, currencies, callbackURL, showWelcome }: P
   );
 }
 
-function Welcome({ firstName, focus, total, onCreate, onJoin, onDashboard }: {
+function Welcome({ firstName, focus, total, onCreate, onDashboard }: {
   firstName: string;
   focus: boolean;
   total: number;
   onCreate: () => void;
-  onJoin: (code: string) => void;
   onDashboard: () => void;
 }) {
-  const [joining, setJoining] = useState(false);
-  const [invite, setInvite] = useState("");
-  const [error, setError] = useState<string>();
-
-  function join(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const code = inviteCodeFrom(invite);
-    if (code) onJoin(code);
-    else setError(BAD_INVITE);
-  }
-
   return (
     <div className="flex flex-col gap-6 text-center">
       <motion.div
@@ -241,54 +224,7 @@ function Welcome({ firstName, focus, total, onCreate, onJoin, onDashboard }: {
           <Plus aria-hidden />
           Create a group
         </Button>
-        <Button
-          variant="outline"
-          className={primaryButton}
-          aria-expanded={joining}
-          aria-controls="join-form"
-          onClick={() => setJoining((j) => !j)}
-        >
-          <Link2 aria-hidden />
-          Join with a link
-        </Button>
-        {joining && (
-          <motion.form
-            id="join-form"
-            onSubmit={join}
-            noValidate
-            initial={{ opacity: 0, y: -6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="rounded-2xl bg-muted/60 p-4 text-left"
-          >
-            <Field>
-              <FieldLabel htmlFor="invite">Invite link or code</FieldLabel>
-              <div className="flex gap-2">
-                <Input
-                  id="invite"
-                  autoFocus
-                  inputMode="url"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  enterKeyHint="go"
-                  placeholder="https://…/join/…"
-                  className={cn(bigInput, "bg-background")}
-                  value={invite}
-                  onChange={(e) => {
-                    setInvite(e.target.value);
-                    setError(undefined);
-                  }}
-                  aria-invalid={!!error}
-                  aria-describedby={error ? "invite-error" : undefined}
-                />
-                <Button type="submit" className="h-12 rounded-xl px-5 text-base">
-                  Join
-                </Button>
-              </div>
-              <FieldError id="invite-error">{error}</FieldError>
-            </Field>
-          </motion.form>
-        )}
+        <JoinWithLink className={primaryButton} />
         <Button variant="ghost" className={primaryButton} onClick={onDashboard}>
           Go to dashboard
         </Button>

@@ -1,23 +1,52 @@
+import { Archive } from "lucide-react";
 import type { Metadata } from "next";
+import Link from "next/link";
+import { OpenCreateGroupOnLoad } from "@/components/create-group-sheet";
+import { EmptyGroups } from "@/components/empty-groups";
+import { GroupGrid } from "@/components/group-card";
+import { listGroupsForUser } from "@/server/groups";
 import { requireOnboardedUser } from "@/server/session";
 
 export const metadata: Metadata = { title: "Dashboard · Hisaab" };
 
-// Placeholder: groups arrive in a later task.
-export default async function DashboardPage() {
+export default async function DashboardPage({ searchParams }: PageProps<"/dashboard">) {
   const user = await requireOnboardedUser();
+  const [{ active, archived }, { new: openCreate }] = await Promise.all([listGroupsForUser(user.id), searchParams]);
   const firstName = user.name.trim().split(/\s+/)[0];
   const today = new Intl.DateTimeFormat("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: user.timezone }).format(new Date());
 
   return (
     <div className="space-y-8">
-      <div>
-        <p className="text-sm text-muted-foreground">{today}</p>
+      {/* Onboarding's "Create a group" lands here. */}
+      {openCreate === "1" && <OpenCreateGroupOnLoad />}
+      <header>
+        <p className="text-sm font-medium text-muted-foreground">{today}</p>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">
-          Hi, {firstName} <span aria-hidden>👋</span>
+          Hi, {firstName} <span aria-hidden className="inline-block origin-[70%_75%] motion-safe:animate-wave">👋</span>
         </h1>
-      </div>
-      <div className="rounded-2xl border border-dashed p-8 text-center text-muted-foreground">Your groups will show up here.</div>
+      </header>
+
+      {active.length === 0 ? (
+        <EmptyGroups archivedCount={archived.length} />
+      ) : (
+        <section aria-labelledby="groups-heading" className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <h2 id="groups-heading" className="text-lg font-semibold tracking-tight">
+              Your groups
+            </h2>
+            {archived.length > 0 && (
+              <Link
+                href="/groups?tab=archived"
+                className="flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+              >
+                <Archive className="size-4" aria-hidden />
+                Archived ({archived.length})
+              </Link>
+            )}
+          </div>
+          <GroupGrid groups={active} />
+        </section>
+      )}
     </div>
   );
 }

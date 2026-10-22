@@ -18,8 +18,10 @@ export const metadata: Metadata = {
   description: "Split expenses with friends. Settle up over UPI.",
 };
 
-// Matches --background in each theme, so the mobile browser chrome blends in.
 export const viewport: Viewport = {
+  // Lets the bottom nav pad itself clear of the home indicator with env(safe-area-inset-bottom).
+  viewportFit: "cover",
+  // Matches --background in each theme, so the mobile browser chrome blends in.
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#ffffff" },
     { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },

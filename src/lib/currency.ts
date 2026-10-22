@@ -28,16 +28,17 @@ export type CurrencyOption = { code: string; label: string };
 export type CurrencyOptions = { common: CurrencyOption[]; rest: CurrencyOption[] };
 
 /**
- * Every currency, labelled "INR — Indian Rupee": the common ones first, then the rest A–Z.
- * Build it on the server and pass it down, so server and browser can't disagree on the names.
+ * Every currency, labelled "INR — Indian Rupee": `first` (say, the person's default), then the common ones, then the
+ * rest A–Z. Build it on the server and pass it down, so server and browser can't disagree on the names.
  */
-export function currencyOptions(): CurrencyOptions {
+export function currencyOptions(first?: string): CurrencyOptions {
   const names = new Intl.DisplayNames(["en"], { type: "currency" });
   const option = (code: string) => ({ code, label: `${code} — ${names.of(code)}` });
+  const top = first ? [first, ...COMMON.filter((code) => code !== first)] : COMMON;
   return {
-    common: COMMON.map(option),
+    common: top.map(option),
     rest: Intl.supportedValuesOf("currency")
-      .filter((code) => !COMMON.includes(code))
+      .filter((code) => !top.includes(code))
       .map(option),
   };
 }
