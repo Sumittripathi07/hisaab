@@ -9,7 +9,9 @@ permissions:
   contents: read
 
 jobs:
+  # Quality gate for pull requests. Pushes to main skip it and deploy straight away: the PR already ran it.
   check:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     env:
       # Dummy value: prisma generate (postinstall) and next build load config but never connect.
@@ -75,7 +77,6 @@ jobs:
           cache-to: type=gha,scope=migrate,mode=max
 
   deploy:
-    needs: check
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
@@ -97,12 +98,26 @@ jobs:
           service_account: ${{ vars.GCP_DEPLOYER_SA }}
       - uses: google-github-actions/setup-gcloud@v3
       - run: gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
-      - name: Build and push images
-        run: |
-          for target in web migrate; do
-            docker build --target "$target" -t "$IMAGE/$target:$GITHUB_SHA" .
-            docker push "$IMAGE/$target:$GITHUB_SHA"
-          done
+      # Layer cache in GitHub Actions: unchanged dependency layers are reused, so only changed code rebuilds.
+      - uses: docker/setup-buildx-action@v4
+      - name: Build and push the web image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: web
+          push: true
+          tags: ${{ env.IMAGE }}/web:${{ github.sha }}
+          cache-from: type=gha,scope=deploy-web
+          cache-to: type=gha,scope=deploy-web,mode=max
+      - name: Build and push the migrate image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          target: migrate
+          push: true
+          tags: ${{ env.IMAGE }}/migrate:${{ github.sha }}
+          cache-from: type=gha,scope=deploy-migrate
+          cache-to: type=gha,scope=deploy-migrate,mode=max
       - name: Migrate
         run: |
           gcloud run jobs deploy hisaab-migrate --image "$IMAGE/migrate:$GITHUB_SHA" --region "$REGION" \
