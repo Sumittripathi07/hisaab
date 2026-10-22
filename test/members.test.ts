@@ -163,10 +163,25 @@ describe("addPlaceholder", () => {
     await expect(addPlaceholder(asha.id, g.id, { displayName: "Again", email: "100%@Example.test" })).rejects.toThrow(ALREADY_IN);
   });
 
-  it("allows the email of someone who left", async () => {
-    const left = await createUser({ email: "gone@example.test" });
+  // Their claim link would be refused ("Use the group's invite link to rejoin"), and the email doesn't carry that link.
+  it("refuses the email of someone who left, whatever its case, and points at the group's invite link", async () => {
+    const left = await createUser({ email: "Gone_1@example.test" });
     await addMember(g.id, { userId: left.id, leftAt: new Date() });
-    await expect(addPlaceholder(asha.id, g.id, { displayName: "Gone", email: "gone@example.test" })).resolves.toBeDefined();
+    await expect(addPlaceholder(asha.id, g.id, { displayName: "Gone", email: "gone_1@EXAMPLE.test" })).rejects.toThrow(
+      "They were in this group before. Share the group's invite link so they can rejoin.",
+    );
+    // Exact comparison: `_` is not a wildcard.
+    await expect(addPlaceholder(asha.id, g.id, { displayName: "Other", email: "gonex1@example.test" })).resolves.toBeDefined();
+    expect(await db.groupMember.count({ where: { groupId: g.id, email: "gone_1@example.test" } })).toBe(0);
+    expect(await readOutbox()).toHaveLength(1);
+  });
+
+  it("allows the email of a placeholder who was removed: they never joined, so their new link works", async () => {
+    const removed = await placeholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    await removeMember(asha.id, removed.id);
+    const { member } = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const rahul = await createUser({ email: "rahul@example.test" });
+    await expect(claimPlaceholder(rahul.id, member.claimToken!)).resolves.toEqual({ groupId: g.id });
   });
 
   it("still adds the person when the sender hit the invite limit, saying the email didn't go", async () => {
@@ -962,8 +977,9 @@ describe("actions", () => {
     expect(await setMemberRoleAction({ groupId: g.id, memberId: member.id, role: "ADMIN" })).toEqual({ ok: true, data: undefined });
     const rotated = await rotateInviteCodeAction({ groupId: g.id });
     expect(rotated).toMatchObject({ ok: true });
+    // The full link, on the app's public origin (as in invite emails), so the browser never builds it from its own origin.
     const fresh = await regenerateClaimTokenAction({ groupId: g.id, memberId: p.id });
-    expect(fresh).toMatchObject({ ok: true });
+    expect(fresh).toEqual({ ok: true, data: `http://localhost:3000/claim/${(await memberRow(p.id)).claimToken}` });
     expect(await removeMemberAction({ groupId: g.id, memberId: p.id })).toEqual({ ok: true, data: undefined });
     expect(await transferOwnershipAction({ groupId: g.id, memberId: member.id })).toEqual({ ok: true, data: undefined });
     expect((await rowFor(ravi.id)).role).toBe("OWNER");

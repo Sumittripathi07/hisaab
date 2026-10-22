@@ -78,7 +78,7 @@ export function MemberList({ groupId, members, me, archived, manage = false }: P
   async function newLink(m: Member) {
     const result = await run(m, () => regenerateClaimTokenAction({ groupId, memberId: m.id }));
     if (!result.ok) return;
-    const url = new URL(`/claim/${result.data}`, location.origin).href;
+    const url = result.data; // built on the server from the app's public origin
     // Copying needs a fresh tap (the wait for the server can use up the menu click's), hence the toast's button.
     toast.success(`New invite link for ${m.displayName}`, {
       description: "The old link no longer works.",
@@ -210,7 +210,7 @@ export function MemberList({ groupId, members, me, archived, manage = false }: P
             ? "You'll become an admin. Only the owner can change roles, remove admins and hand the group over."
             : target?.isPlaceholder
               ? "Their invite link will stop working."
-              : "They'll lose access to the group. They can come back if someone shares the invite link with them."
+              : "They'll lose access to the group, but can rejoin with its invite link. To keep them out, reset the invite link too."
         }
         confirmLabel={confirm?.kind === "transfer" ? "Make owner" : "Remove"}
         destructive={confirm?.kind !== "transfer"}

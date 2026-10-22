@@ -53,14 +53,16 @@ export async function addPlaceholder(
   const { group } = await requireMember(userId, groupId, { write: true });
   const email = input.email?.toLowerCase();
   if (email) {
-    // ponytail: compares in JS over the group's members (a handful to a few dozen); use SQL lower(email) if groups ever get huge.
-    const members = await db.groupMember.findMany({
-      where: { groupId, leftAt: null },
-      select: { email: true, user: { select: { email: true } } },
+    // ponytail: compares in JS over the group's rows (a handful to a few dozen); use SQL lower(email) if groups ever get huge.
+    const rows = await db.groupMember.findMany({
+      where: { groupId },
+      select: { email: true, leftAt: true, user: { select: { email: true } } },
     });
-    if (members.some((m) => [m.email, m.user?.email].some((known) => known?.toLowerCase() === email))) {
-      throw new UserError("They're already in this group.");
-    }
+    const same = rows.filter((m) => [m.email, m.user?.email].some((known) => known?.toLowerCase() === email));
+    if (same.some((m) => !m.leftAt)) throw new UserError("They're already in this group.");
+    // Someone with an account who left: claiming refuses them (checkClaim), and only the invite link brings them back.
+    // A removed placeholder never joined, so a new one for the same email is fine.
+    if (same.some((m) => m.user)) throw new UserError("They were in this group before. Share the group's invite link so they can rejoin.");
   }
 
   const claimToken = newClaimToken();

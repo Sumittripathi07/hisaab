@@ -7,6 +7,7 @@ import { defineAction } from "@/server/action";
 import {
   addPlaceholder,
   claimPlaceholder,
+  claimUrl,
   joinByInviteCode,
   leaveGroup,
   regenerateClaimToken,
@@ -57,10 +58,11 @@ export const claimPlaceholderAction = defineAction(z.object({ token: id }), asyn
   return claimed;
 });
 
+/** Returns the new claim link in full, on the app's public origin, like the one in invite emails. */
 export const regenerateClaimTokenAction = defineAction(memberSchema, async ({ groupId, memberId }, user) => {
   const token = await regenerateClaimToken(user.id, memberId);
   refresh(groupId);
-  return token;
+  return claimUrl(token);
 });
 
 export const removeMemberAction = defineAction(memberSchema, async ({ groupId, memberId }, user) => {
