@@ -13,8 +13,10 @@ const USED_LINK = "This link was already used or has been reset.";
 const NOT_JOINED = "They haven't joined Hisaab yet.";
 const STALE = "That changed while you were doing it. Please try again.";
 
-/** Matches an email whatever its case. Prisma lowers both sides, so `_` and `%` in an address stay literal. */
-const sameEmail = (email: string) => ({ equals: email, mode: "insensitive" as const });
+// Emails are compared as exact strings (lowercased), never with Prisma's `mode: "insensitive"`: on Postgres that compiles
+// to ILIKE and doesn't escape the value, so a `_` or `%` in an address would match other people's addresses.
+// Placeholder emails are stored lowercased (addPlaceholder is the only writer); a user's email may not be, so it is lowercased
+// at the comparison point.
 
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 
@@ -42,11 +44,14 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
   const { group } = await requireMember(userId, groupId, { write: true });
   const email = input.email?.toLowerCase();
   if (email) {
-    const taken = await db.groupMember.findFirst({
-      where: { groupId, leftAt: null, OR: [{ email: sameEmail(email) }, { user: { email: sameEmail(email) } }] },
-      select: { id: true },
+    // ponytail: compares in JS over the group's members (a handful to a few dozen); use SQL lower(email) if groups ever get huge.
+    const members = await db.groupMember.findMany({
+      where: { groupId, leftAt: null },
+      select: { email: true, user: { select: { email: true } } },
     });
-    if (taken) throw new UserError("They're already in this group.");
+    if (members.some((m) => [m.email, m.user?.email].some((known) => known?.toLowerCase() === email))) {
+      throw new UserError("They're already in this group.");
+    }
   }
 
   const placeholder = await db.groupMember.create({
@@ -74,17 +79,18 @@ export async function addPlaceholder(userId: string, groupId: string, input: Pla
 }
 
 /**
- * Puts the person in the group the invite code belongs to. Safe to repeat: someone already in gets their group back,
- * someone who left gets their old row back, and someone a placeholder was made for (same email) takes it over.
+ * Puts the person in the group the invite code belongs to. Safe to repeat: someone already in gets their group back
+ * (even if it's archived, where they can still read it), someone who left gets their old row back, and someone a
+ * placeholder was made for (same email) takes it over. Anyone not in the group is refused once it is archived.
  */
 export async function joinByInviteCode(userId: string, code: string): Promise<{ groupId: string }> {
   const group = await db.group.findUnique({ where: { inviteCode: code } });
   if (!group || group.type === "DIRECT") throw new NotFoundError("This invite link is invalid or has been reset.");
-  if (group.archivedAt) throw new UserError(ARCHIVED);
   const groupId = group.id;
 
   const existing = await db.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
   if (existing && !existing.leftAt) return { groupId };
+  if (group.archivedAt) throw new UserError(ARCHIVED);
 
   try {
     if (existing) {
@@ -93,7 +99,7 @@ export async function joinByInviteCode(userId: string, code: string): Promise<{ 
     } else {
       const user = await db.user.findUniqueOrThrow({ where: { id: userId }, select: { name: true, email: true } });
       const placeholder = await db.groupMember.findFirst({
-        where: { groupId, userId: null, leftAt: null, email: sameEmail(user.email) },
+        where: { groupId, userId: null, leftAt: null, email: user.email.toLowerCase() },
         orderBy: { createdAt: "asc" },
         select: { id: true },
       });

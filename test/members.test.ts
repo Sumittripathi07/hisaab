@@ -141,6 +141,21 @@ describe("addPlaceholder", () => {
     expect(await db.groupMember.count({ where: { groupId: g.id } })).toBe(3);
   });
 
+  it("treats _ and % in the new email literally, so it isn't taken for a member's address", async () => {
+    await memberWith("MEMBER", { email: "asha@example.test" });
+    await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    for (const email of ["ash_@example.test", "%@example.test", "r_hul@example.test"]) {
+      await expect(addPlaceholder(asha.id, g.id, { displayName: "New", email })).resolves.toMatchObject({ email });
+    }
+  });
+
+  it("still refuses a member's own address when it has _ or % in it", async () => {
+    await memberWith("MEMBER", { email: "a_b@example.test" });
+    await addPlaceholder(asha.id, g.id, { displayName: "Odd", email: "100%@example.test" });
+    await expect(addPlaceholder(asha.id, g.id, { displayName: "Again", email: "A_B@example.test" })).rejects.toThrow(ALREADY_IN);
+    await expect(addPlaceholder(asha.id, g.id, { displayName: "Again", email: "100%@Example.test" })).rejects.toThrow(ALREADY_IN);
+  });
+
   it("allows the email of someone who left", async () => {
     const left = await createUser({ email: "gone@example.test" });
     await addMember(g.id, { userId: left.id, leftAt: new Date() });
@@ -225,7 +240,7 @@ describe("joinByInviteCode", () => {
 
   it("joining claims a placeholder invited with the same email (case-insensitive)", async () => {
     const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
-    const rahul = await createUser({ email: "Rahul@Example.test", name: "Rahul K" });
+    const rahul = await createUser({ email: "Rahul@Example.TEST", name: "Rahul K" });
     expect(await joinByInviteCode(rahul.id, g.inviteCode)).toEqual({ groupId: g.id });
     expect(await memberRow(p.id)).toMatchObject({ userId: rahul.id, claimToken: null, displayName: "Rahul K" });
     expect(await db.groupMember.count({ where: { groupId: g.id } })).toBe(2);
@@ -240,12 +255,27 @@ describe("joinByInviteCode", () => {
     expect((await memberRow(p.id)).userId).toBe(rahul.id);
   });
 
-  it("does not claim a placeholder with another email, and treats _ in an email literally", async () => {
-    const p = await addPlaceholder(asha.id, g.id, { displayName: "A B", email: "a_b@example.test" });
-    const other = await createUser({ email: "axb@example.test" });
+  it("does not claim a placeholder made for a different email", async () => {
+    const p = await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const other = await createUser({ email: "other@example.test" });
     await joinByInviteCode(other.id, g.inviteCode);
     expect(await memberRow(p.id)).toMatchObject({ userId: null, claimToken: p.claimToken });
-    expect(await rowFor(other.id)).not.toMatchObject({ id: p.id });
+    expect((await rowFor(other.id)).id).not.toBe(p.id);
+  });
+
+  it("treats _ and % in the joiner's own email literally, so they can't take over someone else's placeholder", async () => {
+    const axb = await addPlaceholder(asha.id, g.id, { displayName: "A X B", email: "axb@example.test" });
+    const other = await addPlaceholder(asha.id, g.id, { displayName: "Other", email: "other@example.test" });
+    const underscore = await createUser({ email: "a_b@example.test" });
+    const percent = await createUser({ email: "%@example.test" });
+    for (const joiner of [underscore, percent]) {
+      await joinByInviteCode(joiner.id, g.inviteCode);
+      expect((await rowFor(joiner.id)).id).not.toBe(axb.id);
+      expect((await rowFor(joiner.id)).id).not.toBe(other.id);
+    }
+    expect(await memberRow(axb.id)).toMatchObject({ userId: null, claimToken: axb.claimToken });
+    expect(await memberRow(other.id)).toMatchObject({ userId: null, claimToken: other.claimToken });
+    expect(await db.groupMember.count({ where: { groupId: g.id } })).toBe(5); // Asha, two placeholders, two joiners
   });
 
   it("does not claim a placeholder that was removed", async () => {
@@ -257,11 +287,34 @@ describe("joinByInviteCode", () => {
     expect((await rowFor(rahul.id)).id).not.toBe(p.id);
   });
 
-  it("refuses joining an archived group", async () => {
+  it("refuses a non-member joining an archived group", async () => {
     await archive();
     await expect(joinByInviteCode(ravi.id, g.inviteCode)).rejects.toThrow(ARCHIVED);
-    await expect(joinByInviteCode(asha.id, g.inviteCode)).rejects.toThrow(ARCHIVED);
     expect(await db.groupMember.count({ where: { userId: ravi.id } })).toBe(0);
+  });
+
+  it("refuses someone who left joining an archived group, leaving their row as it was", async () => {
+    const { user: gone, member } = await memberWith("MEMBER");
+    await removeMember(asha.id, member.id);
+    const before = await memberRow(member.id);
+    await archive();
+    await expect(joinByInviteCode(gone.id, g.inviteCode)).rejects.toThrow(ARCHIVED);
+    expect(await memberRow(member.id)).toEqual(before);
+  });
+
+  it("still lands an active member on their archived group", async () => {
+    await archive();
+    await expect(joinByInviteCode(asha.id, g.inviteCode)).resolves.toEqual({ groupId: g.id });
+    const { user: admin } = await memberWith("ADMIN");
+    await expect(joinByInviteCode(admin.id, g.inviteCode)).resolves.toEqual({ groupId: g.id });
+  });
+
+  it("refuses an archived group's invite for someone with a placeholder waiting too", async () => {
+    await addPlaceholder(asha.id, g.id, { displayName: "Rahul", email: "rahul@example.test" });
+    const rahul = await createUser({ email: "rahul@example.test" });
+    await archive();
+    await expect(joinByInviteCode(rahul.id, g.inviteCode)).rejects.toThrow(ARCHIVED);
+    expect(await db.groupMember.count({ where: { groupId: g.id, userId: rahul.id } })).toBe(0);
   });
 
   it("refuses an unknown or rotated invite code", async () => {
