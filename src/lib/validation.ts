@@ -14,8 +14,20 @@ function isTimezone(tz: string): boolean {
 
 const UPI_ID = /^[a-z0-9._-]{2,256}@[a-z][a-z0-9]{1,63}$/;
 
+// Control characters (newlines included: names go into email subjects) and the bidi marks, embeddings, overrides and
+// isolates that can make a name read as something else. Zero-width joiners stay: emoji sequences need them.
+const INVISIBLE = /[\p{Cc}\p{Zl}\p{Zp}؜‎‏‪-‮⁦-⁩]/gu;
+
 // ponytail: `.max` counts UTF-16 units, so an emoji uses 2 of the 40. Switch to Intl.Segmenter if that ever bites.
-export const displayNameSchema = z.string().trim().min(1, "Enter a name").max(40, "Name must be 40 characters or fewer");
+export const displayNameSchema = z
+  .string()
+  .overwrite((name) => name.replace(INVISIBLE, ""))
+  .trim()
+  .min(1, "Enter a name")
+  .max(40, "Name must be 40 characters or fewer");
+
+/** A name from sign-up (Google's profile, or the magic-link body) through the same rules; one they refuse is left blank for onboarding to ask. */
+export const signUpName = (name: string): string => displayNameSchema.catch("").parse(name);
 
 export const currencySchema = z
   .string()
