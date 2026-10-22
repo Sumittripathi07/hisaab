@@ -896,7 +896,7 @@ describe("actions", () => {
     signInAs(ravi);
     expect(await joinByInviteCodeAction({ code: g.inviteCode })).toEqual({ ok: true, data: { groupId: g.id } });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
   });
 
   it("shows the invite errors as they are", async () => {
@@ -910,7 +910,7 @@ describe("actions", () => {
     signInAs(asha);
     const res = await addPlaceholderAction({ groupId: g.id, displayName: " Rahul ", email: "Rahul@Example.test" });
     expect(res).toMatchObject({ ok: true, data: { member: { displayName: "Rahul", email: "rahul@example.test" }, emailSent: true } });
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
     expect(await addPlaceholderAction({ groupId: g.id, displayName: "Priya", email: "" })).toMatchObject({
       ok: true,
       data: { member: { email: null }, emailSent: null },
@@ -929,7 +929,7 @@ describe("actions", () => {
       data: { member: { displayName: "Rahul", email: "rahul@example.test", userId: null }, emailSent: false },
     });
     expect(await db.groupMember.count({ where: { groupId: g.id, userId: null } })).toBe(1);
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
   });
 
   it("addPlaceholderAction keeps the person and refreshes when sending fails for another reason", async () => {
@@ -941,7 +941,7 @@ describe("actions", () => {
       error: "Something went wrong. Please try again.",
     });
     expect(await db.groupMember.count({ where: { groupId: g.id, userId: null } })).toBe(1);
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
   });
 
   it("claimPlaceholderAction claims and refreshes", async () => {
@@ -949,7 +949,7 @@ describe("actions", () => {
     const rahul = await createUser();
     signInAs(rahul);
     expect(await claimPlaceholderAction({ token: p.claimToken! })).toEqual({ ok: true, data: { groupId: g.id } });
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
     expect(await claimPlaceholderAction({ token: p.claimToken! })).toEqual({ ok: false, error: USED_LINK });
     expect(await claimPlaceholderAction({ token: "" })).toMatchObject({ ok: false });
   });
@@ -984,7 +984,7 @@ describe("actions", () => {
     expect(await transferOwnershipAction({ groupId: g.id, memberId: member.id })).toEqual({ ok: true, data: undefined });
     expect((await rowFor(ravi.id)).role).toBe("OWNER");
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
 
     expect(await leaveGroupAction({ groupId: g.id })).toEqual({ ok: true, data: undefined });
     expect(await leaveGroupAction({ groupId: g.id })).toEqual({ ok: false, error: "You don't have access to this group." });

@@ -268,7 +268,7 @@ describe("group actions", () => {
     const res = await updateGroupAction({ groupId: g.id, name: "Renamed", type: "EVENT", baseCurrency: "USD" });
     expect(res).toMatchObject({ ok: true, data: { id: g.id, name: "Renamed", type: "EVENT", baseCurrency: "USD" } });
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
   });
 
   it("hands a non-admin a safe message and changes nothing", async () => {
@@ -290,7 +290,7 @@ describe("group actions", () => {
     expect(await unarchiveGroupAction({ groupId: g.id })).toEqual({ ok: true, data: undefined });
     expect((await db.group.findUniqueOrThrow({ where: { id: g.id } })).archivedAt).toBeNull();
     expect(revalidatePath).toHaveBeenCalledWith("/dashboard");
-    expect(revalidatePath).toHaveBeenCalledWith("/groups/[groupId]", "layout");
+    expect(revalidatePath).toHaveBeenCalledWith("/(app)/groups/[groupId]", "layout");
   });
 
   it("needs a group id", async () => {

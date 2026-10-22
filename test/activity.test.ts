@@ -56,7 +56,7 @@ describe("revalidateGroup", () => {
   it("refreshes the lists and, through the route pattern, every group page", () => {
     vi.mocked(revalidatePath).mockClear();
     revalidateGroup();
-    expect(vi.mocked(revalidatePath).mock.calls).toEqual([["/dashboard"], ["/groups"], ["/activity"], ["/groups/[groupId]", "layout"]]);
+    expect(vi.mocked(revalidatePath).mock.calls).toEqual([["/dashboard"], ["/groups"], ["/activity"], ["/(app)/groups/[groupId]", "layout"]]);
   });
 });
 
