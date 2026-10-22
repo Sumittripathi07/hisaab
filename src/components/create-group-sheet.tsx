@@ -1,12 +1,13 @@
 "use client";
 
+import { XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { createContext, use, useEffect, useState, useSyncExternalStore } from "react";
+import { createContext, use, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { GroupForm } from "@/components/group-form";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
+import { Drawer, DrawerClose, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer";
 import type { CurrencyOptions } from "@/lib/currency";
 import type { GroupInput } from "@/lib/validation";
 import { createGroupAction } from "@/server/actions/groups";
@@ -34,6 +35,7 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  const nameRef = useRef<HTMLInputElement>(null);
   const desktop = useSyncExternalStore(subscribe, () => matchMedia(DESKTOP).matches, () => false);
 
   async function create(values: GroupInput) {
@@ -47,10 +49,14 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
     return result;
   }
 
-  // Both open with the name field focused (the drawer would otherwise focus itself).
-  const focusName = () => document.getElementById("group-name");
   const form = (
-    <GroupForm currencies={currencies} defaultValues={{ baseCurrency: defaultCurrency }} submitLabel="Create group" onSubmit={create} />
+    <GroupForm
+      currencies={currencies}
+      defaultValues={{ baseCurrency: defaultCurrency }}
+      submitLabel="Create group"
+      onSubmit={create}
+      nameInputRef={nameRef}
+    />
   );
 
   return (
@@ -58,7 +64,8 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
       {children}
       {desktop ? (
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogContent initialFocus={focusName} className="flex max-h-[calc(100dvh-4rem)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-lg">
+          {/* Both open with the name field focused (the drawer would otherwise focus itself). */}
+          <DialogContent initialFocus={nameRef} className="flex max-h-[calc(100dvh-4rem)] flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:max-w-lg">
             <DialogHeader className="gap-1 p-6 pb-4">
               <DialogTitle className="text-xl font-semibold">{TITLE}</DialogTitle>
               <DialogDescription>{DESCRIPTION}</DialogDescription>
@@ -68,11 +75,18 @@ export function CreateGroupProvider({ currencies, defaultCurrency, children }: {
         </Dialog>
       ) : (
         <Drawer open={open} onOpenChange={setOpen} showSwipeHandle>
-          <DrawerContent initialFocus={focusName} className="rounded-t-3xl">
+          <DrawerContent initialFocus={nameRef} className="rounded-t-3xl">
             <DrawerHeader className="gap-1 pb-4">
               <DrawerTitle className="text-xl font-semibold">{TITLE}</DrawerTitle>
               <DrawerDescription>{DESCRIPTION}</DrawerDescription>
             </DrawerHeader>
+            {/* Swiping and the backdrop aren't available to screen readers or switch access; this is. */}
+            <DrawerClose
+              render={<Button variant="ghost" size="icon" className="absolute top-3 right-3 size-9 rounded-full text-muted-foreground" />}
+              aria-label="Close"
+            >
+              <XIcon className="size-5" aria-hidden />
+            </DrawerClose>
             <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pt-1">{form}</div>
           </DrawerContent>
         </Drawer>
@@ -90,10 +104,12 @@ export function CreateGroupButton(props: React.ComponentProps<typeof Button>) {
 /** Opens the sheet once the page has loaded, as a tap would; for /dashboard?new=1, which it then drops from the URL. */
 export function OpenCreateGroupOnLoad() {
   const setOpen = use(SetOpen);
+  const router = useRouter();
   useEffect(() => {
     setOpen(true);
-    // A one-shot trigger: neither Back nor a refresh should reopen the sheet.
-    window.history.replaceState(null, "", "/dashboard");
-  }, [setOpen]);
+    // A one-shot trigger: neither Back nor a refresh should reopen the sheet. Through the router, not
+    // history.replaceState, which keeps this page's tree (with this component in it) for Back to replay.
+    router.replace("/dashboard", { scroll: false });
+  }, [setOpen, router]);
   return null;
 }

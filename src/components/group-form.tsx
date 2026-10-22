@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, LoaderCircle } from "lucide-react";
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { bigInput, CurrencyField, NETWORK_ERROR } from "@/components/profile-fields";
 import { Button } from "@/components/ui/button";
@@ -21,10 +21,12 @@ type Props = {
   submitLabel: string;
   /** Gets every field, always: updating a group resets anything left out to its default. */
   onSubmit: (values: GroupInput) => Promise<ActionResult<unknown>>;
+  /** The name input, for a sheet to focus when it opens. */
+  nameInputRef?: React.RefObject<HTMLInputElement | null>;
 };
 
 /** A group's name, look and settings. Create and settings share it; the caller decides what success means. */
-export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: Props) {
+export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, nameInputRef }: Props) {
   const [values, setValues] = useState<GroupInput>(() => {
     const type = defaultValues?.type ?? "OTHER";
     return {
@@ -43,7 +45,10 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
   const [pending, setPending] = useState(false);
   // The values last saved. Until something changes, submitting again would only repeat it (or, creating, make a twin).
   const [saved, setSaved] = useState<GroupInput>();
-  const nameRef = useRef<HTMLInputElement>(null);
+  const ownNameRef = useRef<HTMLInputElement>(null);
+  const nameRef = nameInputRef ?? ownNameRef;
+  // Unique per form: settings renders one inline while the create sheet can be open over it.
+  const id = useId();
   const set = <K extends keyof GroupInput>(key: K, value: GroupInput[K]) => setValues((v) => ({ ...v, [key]: value }));
   const nameIssue = (name: string) => groupInputSchema.shape.name.safeParse(name).error?.issues[0].message;
 
@@ -78,7 +83,7 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
   return (
     <form onSubmit={submit} noValidate className="flex flex-col gap-6">
       <Field>
-        <FieldLabel htmlFor="group-name">Group name</FieldLabel>
+        <FieldLabel htmlFor={`${id}-name`}>Group name</FieldLabel>
         <div className="flex items-center gap-3">
           <span
             aria-hidden
@@ -91,7 +96,7 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
           </span>
           <Input
             ref={nameRef}
-            id="group-name"
+            id={`${id}-name`}
             name="name"
             autoComplete="off"
             autoCapitalize="words"
@@ -105,10 +110,10 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
               if (nameError) setNameError(nameIssue(e.target.value));
             }}
             aria-invalid={!!nameError}
-            aria-describedby={nameError ? "group-name-error" : undefined}
+            aria-describedby={nameError ? `${id}-name-error` : undefined}
           />
         </div>
-        <FieldError id="group-name-error">{nameError}</FieldError>
+        <FieldError id={`${id}-name-error`}>{nameError}</FieldError>
       </Field>
 
       <FieldSet className="gap-0">
@@ -187,7 +192,7 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
       </FieldSet>
 
       <CurrencyField
-        id="baseCurrency"
+        id={`${id}-currency`}
         label="Currency"
         hint="Balances and totals are shown in this currency."
         value={values.baseCurrency}
@@ -197,18 +202,18 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit }: 
 
       <label className="flex cursor-pointer items-center justify-between gap-4 rounded-xl border p-3.5">
         <span className="min-w-0">
-          <span id="simplify-label" className="block text-sm font-medium">
+          <span id={`${id}-simplify`} className="block text-sm font-medium">
             Simplify debts
           </span>
-          <span id="simplify-hint" className="block text-sm text-muted-foreground">
+          <span id={`${id}-simplify-hint`} className="block text-sm text-muted-foreground">
             Combines who owes whom, so everyone settles up in fewer payments.
           </span>
         </span>
         <Switch
           checked={values.simplifyDebts}
           onCheckedChange={(checked) => set("simplifyDebts", checked)}
-          aria-labelledby="simplify-label"
-          aria-describedby="simplify-hint"
+          aria-labelledby={`${id}-simplify`}
+          aria-describedby={`${id}-simplify-hint`}
           // Unchecked, shadcn's track is near-white on white; this keeps it at 3:1 against the sheet in both themes.
           className="data-unchecked:bg-muted-foreground/75 dark:data-unchecked:bg-muted-foreground/75"
         />

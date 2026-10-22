@@ -27,7 +27,23 @@ test("create a group from the empty dashboard", async ({ page }) => {
   await expect(page).toHaveURL(/\/dashboard$/);
   await page.keyboard.press("Escape");
   await expect(page.getByLabel("Group name")).toBeHidden();
+  // The spent trigger stays spent: going somewhere and coming Back doesn't reopen it, nor does a reload.
+  await page.getByRole("link", { name: "Groups", exact: true }).click();
+  await expect(page).toHaveURL(/\/groups$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("link", { name: /Goa Trip/ })).toBeVisible();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
   await page.reload();
   await expect(page.getByRole("link", { name: /Goa Trip/ })).toBeVisible();
   await expect(page.getByLabel("Group name")).toBeHidden();
+
+  // On a phone the sheet is a drawer, with a Close button for anyone who can't swipe or reach the backdrop.
+  await page.setViewportSize({ width: 375, height: 812 });
+  const fab = page.getByRole("button", { name: "Create a group" });
+  await fab.click();
+  await expect(page.getByLabel("Group name")).toBeFocused();
+  await page.getByRole("button", { name: "Close" }).click();
+  await expect(page.getByLabel("Group name")).toBeHidden();
+  await expect(fab).toBeFocused();
 });
