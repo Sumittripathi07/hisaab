@@ -1,13 +1,15 @@
+import { AddExpenseFab } from "@/components/add-expense-fab";
 import { BottomNav } from "@/components/app-shell/bottom-nav";
-import { Fab } from "@/components/app-shell/fab";
 import { Sidebar } from "@/components/app-shell/sidebar";
 import { CreateGroupProvider } from "@/components/create-group-sheet";
 import { currencyOptions } from "@/lib/currency";
+import { listGroupsForUser } from "@/server/groups";
 import { requireOnboardedUser } from "@/server/session";
 
-/** Sidebar from 768px up; below that, a bottom nav with a "+" button floating above it. */
+/** Sidebar from 768px up; below that, a bottom nav with a "+" button floating above it (add an expense, or start a group). */
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireOnboardedUser();
+  const { active } = await listGroupsForUser(user.id);
   return (
     <CreateGroupProvider currencies={currencyOptions(user.defaultCurrency)} defaultCurrency={user.defaultCurrency}>
       <div className="flex min-h-dvh">
@@ -18,7 +20,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </main>
       </div>
       <BottomNav />
-      <Fab />
+      <AddExpenseFab groups={active.map(({ id, name, emoji }) => ({ id, name, emoji }))} />
     </CreateGroupProvider>
   );
 }

@@ -1,7 +1,7 @@
-import { Archive } from "lucide-react";
+import { Archive, Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { OpenCreateGroupOnLoad } from "@/components/create-group-sheet";
+import { CreateGroupButton, OpenCreateGroupOnLoad } from "@/components/create-group-sheet";
 import { EmptyGroups } from "@/components/empty-groups";
 import { GroupGrid } from "@/components/group-card";
 import { listGroupsForUser } from "@/server/groups";
@@ -34,15 +34,22 @@ export default async function DashboardPage({ searchParams }: PageProps<"/dashbo
             <h2 id="groups-heading" className="text-lg font-semibold tracking-tight">
               Your groups
             </h2>
-            {archived.length > 0 && (
-              <Link
-                href="/groups?tab=archived"
-                className="flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
-              >
-                <Archive className="size-4" aria-hidden />
-                Archived ({archived.length})
-              </Link>
-            )}
+            <div className="flex items-center gap-4">
+              {archived.length > 0 && (
+                <Link
+                  href="/groups?tab=archived"
+                  className="flex items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <Archive className="size-4" aria-hidden />
+                  Archived ({archived.length})
+                </Link>
+              )}
+              {/* The sidebar has this from 768px; on phones the + button adds expenses, so this is where a group starts. */}
+              <CreateGroupButton variant="outline" className="h-10 rounded-xl px-3.5 md:hidden">
+                <Plus aria-hidden />
+                New group
+              </CreateGroupButton>
+            </div>
           </div>
           <GroupGrid groups={active} />
         </section>

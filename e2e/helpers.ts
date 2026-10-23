@@ -10,7 +10,13 @@ let lastIp = 0;
  * context counts as its own client instead of every test sharing one budget.
  */
 export async function newPage(browser: Browser, options: BrowserContextOptions = {}): Promise<Page> {
-  const context = await browser.newContext({ ...options, extraHTTPHeaders: { "x-forwarded-for": `10.0.0.${++lastIp}` } });
+  // Onboarding takes a person's currency and timezone from their browser: an Indian one, so amounts read "₹1,200".
+  const context = await browser.newContext({
+    locale: "en-IN",
+    timezoneId: "Asia/Kolkata",
+    ...options,
+    extraHTTPHeaders: { "x-forwarded-for": `10.0.0.${++lastIp}` },
+  });
   return context.newPage();
 }
 
@@ -87,4 +93,25 @@ export async function createGroupViaUi(page: Page, name: string): Promise<string
   await expect(page).toHaveURL(/\/groups\/c/);
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
   return page.url();
+}
+
+/** Adds someone without an account through the invite sheet, and waits until they're in the group's member list. */
+export async function addPlaceholderViaUi(page: Page, name: string): Promise<void> {
+  await page.getByRole("button", { name: "Invite people" }).click();
+  const form = page.getByRole("form", { name: "Add someone without an account" });
+  await form.getByLabel("Name").fill(name);
+  await form.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page.getByText(`${name} was added`)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("list", { name: "Members" }).getByText(name)).toBeVisible();
+}
+
+/** Adds an expense, paid by you and split equally, from a group's page at desktop width: "Add expense", keypad, Next, Save. */
+export async function addExpenseViaUi(page: Page, { amount, description }: { amount: string; description: string }): Promise<void> {
+  await page.getByRole("button", { name: "Add expense" }).click();
+  for (const key of amount) await page.getByRole("button", { name: key === "." ? "Decimal point" : key, exact: true }).click();
+  await page.getByRole("button", { name: "Next" }).click();
+  await page.getByLabel("Description").fill(description);
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("link", { name: description })).toBeVisible();
 }
