@@ -130,10 +130,12 @@ jobs:
             --set-secrets DATABASE_URL=HISAAB_DATABASE_URL:latest
           gcloud run jobs execute hisaab-migrate --region "$REGION" --wait
       - name: Deploy
+        # PROXY_SECRET switches on the proxy gate (src/proxy.ts): only requests through the Cloudflare Worker, which adds
+        # the secret, get in, and the service's own run.app URL answers 403. APP_URL must be the Worker's domain.
         run: |
           gcloud run deploy hisaab-web --image "$IMAGE/web:$GITHUB_SHA" --region "$REGION" \
             --service-account "$RUNTIME_SA" --add-cloudsql-instances "$SQL_INSTANCE" \
-            --set-secrets DATABASE_URL=HISAAB_DATABASE_URL:latest,BETTER_AUTH_SECRET=HISAAB_BETTER_AUTH_SECRET:latest,GOOGLE_CLIENT_ID=HISAAB_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=HISAAB_GOOGLE_CLIENT_SECRET:latest,SMTP_URL=HISAAB_SMTP_URL:latest \
+            --set-secrets DATABASE_URL=HISAAB_DATABASE_URL:latest,BETTER_AUTH_SECRET=HISAAB_BETTER_AUTH_SECRET:latest,GOOGLE_CLIENT_ID=HISAAB_GOOGLE_CLIENT_ID:latest,GOOGLE_CLIENT_SECRET=HISAAB_GOOGLE_CLIENT_SECRET:latest,SMTP_URL=HISAAB_SMTP_URL:latest,PROXY_SECRET=HISAAB_PROXY_SECRET:latest \
             --set-env-vars "BETTER_AUTH_URL=$APP_URL,EMAIL_FROM=Hisaab <sumit.tpt07@gmail.com>" \
             --min-instances 0 --max-instances 3 --concurrency 500 --timeout 3600 \
             --cpu 1 --memory 512Mi --port 8080 --allow-unauthenticated

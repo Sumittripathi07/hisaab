@@ -95,6 +95,18 @@ Merging to `main` runs `.github/workflows/ci.yml`:
 
 Runtime secrets are mounted from Secret Manager; `BETTER_AUTH_URL` comes from the `APP_URL` repository variable.
 
+### Custom domain
+
+The app lives at **https://hisab.sumittripathi.dev**. Cloud Run can't map a custom domain in asia-south1, so a
+Cloudflare Worker, `hisab-proxy` in [`infra/cloudflare-worker`](infra/cloudflare-worker/README.md), serves the domain and
+forwards every request to the Cloud Run service. It sets the visitor's IP for Better Auth's rate limits and adds a
+shared secret, `HISAAB_PROXY_SECRET`, which Cloud Run also gets as `PROXY_SECRET`. With it set, the proxy gate in
+`src/proxy.ts` answers **403** to any request without the secret, so the service's own `*.run.app` URL no longer
+serves the app (only build assets and the favicon). Locally and in tests `PROXY_SECRET` is unset and the gate is off.
+
+`APP_URL` (and so `BETTER_AUTH_URL`) is `https://hisab.sumittripathi.dev`, and the Google OAuth client lists
+`https://hisab.sumittripathi.dev/api/auth/callback/google` as a redirect URI.
+
 ### Infra script
 
 `infra/setup.sh` provisions everything idempotently: APIs, Artifact Registry, Cloud SQL, the two service accounts,
