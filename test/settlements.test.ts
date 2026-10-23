@@ -272,6 +272,20 @@ describe("getSettleUp", () => {
     expect(inUsd).toMatchObject({ from: raviInUsd.id, amount: 1000n, upi: null });
   });
 
+  it("hands a UPI ID only to the person paying it", async () => {
+    await db.user.update({ where: { id: ravi.id }, data: { upiId: "ravi@okhdfc" } });
+    // Rahul pays Asha, which isn't Ravi's payment, so Asha's UPI ID stays out of his view.
+    const [mine, others] = (await getSettleUp(ravi.id, g.id)).transfers;
+    expect(mine.upi).toMatchObject({ upiId: "asha@okicici" });
+    expect(others).toMatchObject({ from: rahulM.id, to: ashaM.id, involvesMe: false, upi: null });
+
+    // Ravi overpays, so now he is the payee of both transfers: nobody gets his UPI ID, himself included.
+    await recordSettlement(ravi.id, pay(raviM, ashaM, 100000n));
+    const { transfers } = await getSettleUp(ravi.id, g.id);
+    expect(transfers.map((x) => x.to)).toEqual([raviM.id, raviM.id]);
+    expect(transfers.map((x) => x.upi)).toEqual([null, null]);
+  });
+
   it("lets anyone record between two placeholders, with no UPI to a placeholder", async () => {
     await recordSettlement(asha.id, pay(devM, ashaM, 66666n)); // Dev paid Asha's way, so Dev is now owed
     const [, between] = (await getSettleUp(ravi.id, g.id)).transfers;

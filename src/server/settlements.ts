@@ -186,7 +186,7 @@ export type SettleUpTransfer = Transfer & {
   toName: string;
   involvesMe: boolean;
   canRecord: boolean;
-  /** Offered when the group is in INR and the payee has a UPI ID on their profile. */
+  /** Offered to the payer only (a UPI ID can embed a phone number), when the group is in INR and the payee has a UPI ID on their profile. */
   upi: { link: string; upiId: string } | null;
 };
 
@@ -209,7 +209,7 @@ export async function getSettleUp(
   const list = transfers.map((x): SettleUpTransfer => {
     const from = byId.get(x.from)!;
     const to = byId.get(x.to)!;
-    const upiId = currency === "INR" ? to.user?.upiId : null;
+    const upiId = currency === "INR" && x.from === myMemberId ? to.user?.upiId : null;
     return {
       ...x,
       fromName: from.displayName,
