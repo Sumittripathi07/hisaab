@@ -1,25 +1,40 @@
-import { Archive, Settings } from "lucide-react";
+import { Archive, Plus, Settings } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
+import { GroupPageFab } from "@/components/add-expense-fab";
+import { ActivityFeed } from "@/components/activity-feed";
+import { BalancePanel } from "@/components/balance-panel";
+import { ExpenseFilterBar } from "@/components/expense-filters";
+import { ExpenseList } from "@/components/expense-list";
+import { AddExpenseButton, AddExpenseProvider } from "@/components/expense-sheet";
 import { ArchiveToggle, LeaveGroup } from "@/components/group-actions";
+import { GroupTabs } from "@/components/group-tabs";
 import { InviteSheet } from "@/components/invite-sheet";
 import { MemberList } from "@/components/member-list";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { parseFilters, toQuery } from "@/lib/expense-filters";
 import { GROUP_TYPES, groupTint, type GroupType } from "@/lib/group-meta";
+import { PAGE_SIZE, parseLimit } from "@/lib/page-limit";
 import { cn } from "@/lib/utils";
+import { listGroupActivity } from "@/server/activity";
+import { getGroupBalances } from "@/server/balances";
 import { ForbiddenError } from "@/server/errors";
+import { getExpenseFormData, listExpenses } from "@/server/expenses";
 import { getGroupDetail } from "@/server/groups";
 import { claimUrl, inviteUrl } from "@/server/members";
 import { requireOnboardedUser } from "@/server/session";
+import { listSettlements } from "@/server/settlements";
 
 export const metadata: Metadata = { title: "Group · Hisaab" };
 
-export default async function GroupPage({ params }: PageProps<"/groups/[groupId]">) {
+const TAB_LABELS = { expenses: "Expenses", balances: "Balances", activity: "Activity" } as const;
+
+export default async function GroupPage({ params, searchParams }: PageProps<"/groups/[groupId]">) {
   const user = await requireOnboardedUser();
-  const { groupId } = await params;
+  const [{ groupId }, query] = await Promise.all([params, searchParams]);
   const { group, me, members } = await getGroupDetail(user.id, groupId).catch((error) => {
     if (error instanceof ForbiddenError) notFound(); // missing, or not theirs: the same 404 either way
     throw error;
@@ -27,8 +42,21 @@ export default async function GroupPage({ params }: PageProps<"/groups/[groupId]
   const isAdmin = me.role !== "MEMBER";
   const archived = group.archivedAt !== null;
   const link = inviteUrl(group.inviteCode);
+  // "Show more" asks for another page's worth.
+  const limit = parseLimit(query.limit);
+  const filters = parseFilters(query);
+  const filtered = Object.keys(filters).length > 0;
+  const rawTab = [query.tab].flat()[0];
+  const tab = rawTab === "balances" || rawTab === "activity" ? rawTab : "expenses";
+  // Only the tab on show is read; the add-expense sheet is on all of them.
+  const [expenses, balances, activity, formData] = await Promise.all([
+    tab === "expenses" ? listExpenses(user.id, group.id, filters, limit) : null,
+    tab === "balances" ? Promise.all([getGroupBalances(user.id, group.id), listSettlements(user.id, group.id)]) : null,
+    tab === "activity" ? listGroupActivity(user.id, group.id, limit) : null,
+    archived ? null : getExpenseFormData(user.id, group.id),
+  ]);
 
-  return (
+  const page = (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-4">
         <span aria-hidden className={cn("flex size-16 shrink-0 items-center justify-center rounded-2xl text-4xl", groupTint(group.color).tile)}>
@@ -48,13 +76,20 @@ export default async function GroupPage({ params }: PageProps<"/groups/[groupId]
         </div>
         {/* On phones, Invite gets a row of its own; with nothing else to show, the cog stays beside the name. */}
         <div className={cn("flex gap-2", !archived && "w-full sm:w-auto")}>
+          {/* Phones have the + button instead. */}
+          {!archived && (
+            <AddExpenseButton className="hidden h-11 rounded-xl px-4 text-base shadow-sm shadow-primary/20 md:inline-flex">
+              <Plus aria-hidden />
+              Add expense
+            </AddExpenseButton>
+          )}
           {!archived && (
             <InviteSheet
               groupId={group.id}
               groupName={group.name}
               inviteUrl={link}
               qrCode={await QRCode.toDataURL(link, { margin: 1, width: 224 })}
-              className="flex-1 sm:flex-none"
+              className="flex-1 sm:flex-none md:bg-secondary md:text-secondary-foreground md:shadow-none md:hover:bg-secondary/80"
             />
           )}
           {isAdmin && (
@@ -86,23 +121,36 @@ export default async function GroupPage({ params }: PageProps<"/groups/[groupId]
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        {/* Phase 2 puts expenses and balances here. */}
-        {/* A compact row on phones, so the members stay near the top; a roomy card beside them on wider screens. */}
-        <section
-          aria-labelledby="expenses-heading"
-          className="flex items-start gap-4 rounded-3xl border border-dashed p-5 sm:flex-col sm:items-center sm:px-6 sm:py-10 sm:text-center lg:py-16"
-        >
-          <span aria-hidden className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-muted text-2xl sm:size-14 sm:text-3xl">
-            🧾
-          </span>
-          <div>
-            <h2 id="expenses-heading" className="font-semibold tracking-tight sm:text-lg">
-              Expenses are coming next
-            </h2>
-            <p className="mt-1 max-w-sm text-sm text-balance text-muted-foreground sm:text-base">
-              Soon you&apos;ll add what everyone paid, see who owes whom, and settle up over UPI. For now, get everyone in.
-            </p>
-          </div>
+        <section aria-labelledby="tab-heading" className="min-w-0 space-y-4">
+          <h2 id="tab-heading" className="sr-only">
+            {TAB_LABELS[tab]}
+          </h2>
+          <GroupTabs groupId={group.id} current={tab} />
+          {activity && (
+            <ActivityFeed
+              items={activity.items}
+              hasMore={activity.hasMore}
+              moreHref={`/groups/${group.id}?tab=activity&limit=${limit + PAGE_SIZE}`}
+            />
+          )}
+          {balances && <BalancePanel groupId={group.id} balances={balances[0]} settlements={balances[1]} archived={archived} />}
+          {expenses && (
+            <>
+              {/* A group with nothing in it has nothing to search. */}
+              {(expenses.items.length > 0 || filtered) && (
+                <ExpenseFilterBar groupId={group.id} members={members.map((m) => ({ id: m.id, displayName: m.displayName }))} filters={filters} />
+              )}
+              <ExpenseList
+                items={expenses.items}
+                currency={group.baseCurrency}
+                groupId={group.id}
+                hasMore={expenses.hasMore}
+                moreHref={`/groups/${group.id}?${toQuery(filters, { tab: "expenses", limit: String(limit + PAGE_SIZE) })}`}
+                canAdd={!archived}
+                clearHref={filtered ? `/groups/${group.id}?tab=expenses` : undefined}
+              />
+            </>
+          )}
         </section>
 
         <section aria-labelledby="members-heading" className="space-y-3">
@@ -124,5 +172,15 @@ export default async function GroupPage({ params }: PageProps<"/groups/[groupId]
         </section>
       </div>
     </div>
+  );
+
+  // The add-expense sheet needs the group's people and history, which an archived group has no use for.
+  return formData ? (
+    <AddExpenseProvider data={formData} openOnLoad={[query.add].flat()[0] === "1"}>
+      {page}
+      <GroupPageFab />
+    </AddExpenseProvider>
+  ) : (
+    page
   );
 }

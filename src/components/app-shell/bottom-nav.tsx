@@ -12,7 +12,7 @@ export function BottomNav() {
       aria-label="Main"
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/85 pb-[env(safe-area-inset-bottom)] backdrop-blur-lg md:hidden"
     >
-      <ul className="mx-auto grid h-16 max-w-md grid-cols-3 px-2">
+      <ul className="mx-auto grid h-16 max-w-md grid-cols-4 px-2">
         {NAV_ITEMS.map(({ href, label, Icon }) => (
           <li key={href} className="flex">
             <Link

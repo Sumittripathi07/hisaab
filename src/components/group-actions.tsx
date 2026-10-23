@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 import { GroupForm } from "@/components/group-form";
-import { NETWORK_ERROR } from "@/components/profile-fields";
+import { settle } from "@/components/profile-fields";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -24,7 +24,6 @@ import { archiveGroupAction, unarchiveGroupAction, updateGroupAction } from "@/s
 import { leaveGroupAction, rotateInviteCodeAction } from "@/server/actions/members";
 
 type Action = () => Promise<ActionResult<unknown>>;
-const settle = (action: Action) => action().catch(() => ({ ok: false as const, error: NETWORK_ERROR }));
 const sectionButton = "h-11 w-full rounded-xl sm:w-auto";
 
 /**
@@ -85,15 +84,17 @@ export function ConfirmDialog({ open, onOpenChange, title, description, confirmL
 }
 
 /** The group's name, look and settings, saved in place. */
-export function GroupDetailsForm({ groupId, defaultValues, currencies }: {
+export function GroupDetailsForm({ groupId, defaultValues, currencies, currencyLocked }: {
   groupId: string;
   defaultValues: GroupInput;
   currencies: CurrencyOptions;
+  currencyLocked: boolean;
 }) {
   return (
     <GroupForm
       variant="inline"
       currencies={currencies}
+      currencyLocked={currencyLocked}
       defaultValues={defaultValues}
       submitLabel="Save changes"
       onSubmit={async (values) => {

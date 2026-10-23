@@ -22,6 +22,26 @@ enum MemberRole {
   MEMBER
 }
 
+enum SplitMethod {
+  EQUAL
+  EXACT
+  PERCENT
+  SHARES
+  ITEMIZED
+}
+
+enum SettlementMethod {
+  UPI
+  CASH
+  BANK
+  OTHER
+}
+
+enum SettlementStatus {
+  RECORDED
+  DISPUTED
+}
+
 model Group {
   id            String    @id @default(cuid())
   name          String
@@ -38,7 +58,11 @@ model Group {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
-  members GroupMember[]
+  members     GroupMember[]
+  expenses    Expense[]
+  settlements Settlement[]
+  comments    Comment[]
+  activities  Activity[]
 }
 
 /// One row per person in a group. `userId` is null for a placeholder (someone not on Hisaab yet).
@@ -58,8 +82,143 @@ model GroupMember {
   leftAt      DateTime?
   createdAt   DateTime   @default(now())
 
+  expensesCreated    Expense[]
+  expensePayments    ExpensePayer[]
+  expenseShares      ExpenseShare[]
+  settlementsFrom    Settlement[]   @relation("SettlementFrom")
+  settlementsTo      Settlement[]   @relation("SettlementTo")
+  settlementsCreated Settlement[]   @relation("SettlementCreatedBy")
+  comments           Comment[]
+  activities         Activity[]
+
   @@unique([groupId, userId])
   @@index([userId])
+}
+
+/// Money is bigint minor units. Phase 2 is single-currency per group: `currency` is the group's, `fxRate` 1 and
+/// `baseAmount` = `amount`; balances read `baseAmount` only. Itemised splits keep their items in `splitInput`.
+model Expense {
+  id                String      @id @default(cuid())
+  groupId           String
+  group             Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  description       String
+  category          String
+  notes             String?
+  /// A calendar date, exchanged as "YYYY-MM-DD".
+  date              DateTime    @db.Date
+  currency          String
+  amount            BigInt
+  fxRate            Decimal     @default(1) @db.Decimal(18, 8)
+  baseAmount        BigInt
+  splitMethod       SplitMethod
+  splitInput        Json
+  createdByMemberId String
+  createdBy         GroupMember @relation(fields: [createdByMemberId], references: [id])
+  /// Bumped on every edit; a save made against an older version is refused as a conflict.
+  version           Int         @default(1)
+  deletedAt         DateTime?
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
+
+  payers   ExpensePayer[]
+  shares   ExpenseShare[]
+  comments Comment[]
+
+  @@index([groupId, date])
+}
+
+model ExpensePayer {
+  id         String      @id @default(cuid())
+  expenseId  String
+  expense    Expense     @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  memberId   String
+  member     GroupMember @relation(fields: [memberId], references: [id])
+  amount     BigInt
+  baseAmount BigInt
+  createdAt  DateTime    @default(now())
+
+  @@unique([expenseId, memberId])
+  @@index([memberId])
+}
+
+model ExpenseShare {
+  id         String      @id @default(cuid())
+  expenseId  String
+  expense    Expense     @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  memberId   String
+  member     GroupMember @relation(fields: [memberId], references: [id])
+  amount     BigInt
+  baseAmount BigInt
+  createdAt  DateTime    @default(now())
+
+  @@unique([expenseId, memberId])
+  @@index([memberId])
+}
+
+/// A payment `fromMember` made to `toMember`. Settlement edits have no version (last write wins).
+model Settlement {
+  id                String           @id @default(cuid())
+  groupId           String
+  group             Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  fromMemberId      String
+  fromMember        GroupMember      @relation("SettlementFrom", fields: [fromMemberId], references: [id])
+  toMemberId        String
+  toMember          GroupMember      @relation("SettlementTo", fields: [toMemberId], references: [id])
+  currency          String
+  amount            BigInt
+  fxRate            Decimal          @default(1) @db.Decimal(18, 8)
+  baseAmount        BigInt
+  method            SettlementMethod
+  status            SettlementStatus @default(RECORDED)
+  note              String?
+  date              DateTime         @db.Date
+  createdByMemberId String
+  createdBy         GroupMember      @relation("SettlementCreatedBy", fields: [createdByMemberId], references: [id])
+  disputedAt        DateTime?
+  deletedAt         DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  comments Comment[]
+
+  @@index([groupId, date])
+  @@index([fromMemberId])
+  @@index([toMemberId])
+}
+
+/// On exactly one of an expense or a settlement; the service enforces that, there is no CHECK constraint.
+model Comment {
+  id             String      @id @default(cuid())
+  groupId        String
+  group          Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  expenseId      String?
+  expense        Expense?    @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  settlementId   String?
+  settlement     Settlement? @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  authorMemberId String
+  author         GroupMember @relation(fields: [authorMemberId], references: [id])
+  body           String
+  deletedAt      DateTime?
+  createdAt      DateTime    @default(now())
+
+  @@index([expenseId, createdAt])
+  @@index([settlementId, createdAt])
+}
+
+/// The group's feed. `kind` and `payload` follow ActivityKind / ActivityPayloads in src/lib/activity.ts.
+model Activity {
+  id            String      @id @default(cuid())
+  groupId       String
+  group         Group       @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  actorMemberId String
+  actor         GroupMember @relation(fields: [actorMemberId], references: [id])
+  kind          String
+  entityId      String
+  payload       Json
+  createdAt     DateTime    @default(now())
+
+  @@index([groupId, createdAt])
+  @@index([entityId, createdAt])
 }
 
 /// One row per email sent (or attempted). Rate limits count these rows.

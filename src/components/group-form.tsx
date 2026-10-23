@@ -28,10 +28,12 @@ type Props = {
    * the form, for a page, where a stuck bar would sit under the phone's bottom nav.
    */
   variant?: "sheet" | "inline";
+  /** The group already has expenses or payments, which are in its currency, so the currency can't be changed. */
+  currencyLocked?: boolean;
 };
 
 /** A group's name, look and settings. Create and settings share it; the caller decides what success means. */
-export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, nameInputRef, variant = "sheet" }: Props) {
+export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, nameInputRef, variant = "sheet", currencyLocked = false }: Props) {
   const [values, setValues] = useState<GroupInput>(() => {
     const type = defaultValues?.type ?? "OTHER";
     return {
@@ -199,7 +201,8 @@ export function GroupForm({ defaultValues, currencies, submitLabel, onSubmit, na
       <CurrencyField
         id={`${id}-currency`}
         label="Currency"
-        hint="Balances and totals are shown in this currency."
+        hint={currencyLocked ? "The currency can't change once the group has expenses or payments." : "Balances and totals are shown in this currency."}
+        disabled={currencyLocked}
         value={values.baseCurrency}
         onChange={(code) => set("baseCurrency", code)}
         options={currencies}

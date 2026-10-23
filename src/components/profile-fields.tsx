@@ -2,10 +2,16 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select";
 import type { CurrencyOptions } from "@/lib/currency";
+import type { ActionResult } from "@/server/action";
 
 // Shared by onboarding, the account page and the group form.
 
 export const NETWORK_ERROR = "Couldn't reach Hisaab. Check your connection and try again.";
+
+/** Runs a server action; if the call itself fails (no connection), that becomes the same `{ ok: false }` an action returns. */
+export function settle<T>(action: () => Promise<ActionResult<T>>): Promise<ActionResult<T> | { ok: false; error: string }> {
+  return action().catch(() => ({ ok: false as const, error: NETWORK_ERROR }));
+}
 
 /** The first message from a zod safeParse result, or undefined when it passed. */
 export const firstError = (result: { error?: { issues: { message: string }[] } }) => result.error?.issues[0].message;
@@ -50,7 +56,8 @@ export function CurrencyField({
   id = "defaultCurrency",
   label = "Default currency",
   hint = "New groups start in this currency.",
-}: Omit<FieldProps<string>, "error" | "ref"> & { options: CurrencyOptions; id?: string; label?: string; hint?: string }) {
+  disabled,
+}: Omit<FieldProps<string>, "error" | "ref"> & { options: CurrencyOptions; id?: string; label?: string; hint?: string; disabled?: boolean }) {
   return (
     <Field>
       <FieldLabel htmlFor={id}>{label}</FieldLabel>
@@ -60,6 +67,7 @@ export function CurrencyField({
         className="w-full [&>select]:h-12 [&>select]:rounded-xl [&>select]:pl-3.5 [&>select]:text-base"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        disabled={disabled}
         aria-describedby={`${id}-hint`}
       >
         <NativeSelectOptGroup label="Popular">

@@ -48,14 +48,15 @@ test("create a group from the empty dashboard", async ({ browser }) => {
   await expect(page.getByRole("link", { name: /Goa Trip/ })).toBeVisible();
   await expect(page.getByLabel("Group name")).toBeHidden();
 
-  // On a phone the sheet is a drawer, with a Close button for anyone who can't swipe or reach the backdrop.
+  // On a phone the sheet is a drawer, with a Close button for anyone who can't swipe or reach the backdrop. (The + button
+  // adds expenses once there's a group, so a phone starts another from the dashboard.)
   await page.setViewportSize({ width: 375, height: 812 });
-  const fab = page.getByRole("button", { name: "Create a group" });
-  await fab.click();
+  const newGroup = page.getByRole("button", { name: "New group" });
+  await newGroup.click();
   await expect(page.getByLabel("Group name")).toBeFocused();
   await page.getByRole("button", { name: "Close" }).click();
   await expect(page.getByLabel("Group name")).toBeHidden();
-  await expect(fab).toBeFocused();
+  await expect(newGroup).toBeFocused();
 });
 
 /** A person's row in the group's member list. */
