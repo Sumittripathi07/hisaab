@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ExpenseSheet } from "@/components/expense-sheet";
 import { settle } from "@/components/profile-fields";
 import { Button } from "@/components/ui/button";
+import { copyOf } from "@/lib/expense-copy";
 import type { ExpenseFormValues } from "@/lib/validation";
 import { deleteExpenseAction, restoreExpenseAction } from "@/server/actions/expenses";
 import type { ExpenseFormData } from "@/server/expenses";
@@ -36,6 +37,8 @@ function Actions({ data, expenseId, version, initial, canEdit }: Props & { data:
   const [copy, setCopy] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const busy = useRef(false); // set before any re-render, so a double tap sees it
+  // The form lists people who have left, so that this expense can still be edited; a copy has no use for them.
+  const here = data.members.filter((m) => m.active);
 
   const show = (duplicate: boolean) => {
     setCopy(duplicate);
@@ -87,12 +90,12 @@ function Actions({ data, expenseId, version, initial, canEdit }: Props & { data:
         )}
       </div>
       <ExpenseSheet
-        data={data}
+        data={copy ? { ...data, members: here } : data}
         open={open}
         onOpenChange={setOpen}
         mode={copy ? { kind: "add" } : { kind: "edit", expenseId, version }}
-        // A copy is a new expense, so it is dated today rather than on the day of the one it was copied from.
-        initial={copy ? { ...initial, date: data.today } : initial}
+        // A copy is a new expense: dated today, and without anyone who has left since.
+        initial={copy ? copyOf(initial, { active: here.map((m) => m.id), me: data.me, today: data.today }) : initial}
       />
     </>
   );
