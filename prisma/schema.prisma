@@ -182,6 +182,8 @@ model Settlement {
   comments Comment[]
 
   @@index([groupId, date])
+  @@index([fromMemberId])
+  @@index([toMemberId])
 }
 
 /// On exactly one of an expense or a settlement; the service enforces that, there is no CHECK constraint.
