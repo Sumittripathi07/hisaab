@@ -100,7 +100,7 @@ export function SettleCard({ groupId, currency, today, members, transfer: t }: P
               <Smartphone aria-hidden />
               Pay {t.amountText} via UPI
             </a>
-            {tapped ? (
+            {tapped && (
               <div className="space-y-2 rounded-2xl bg-muted/60 p-3">
                 <p className="font-medium">Did it go through?</p>
                 <div className="flex gap-2">
@@ -110,16 +110,15 @@ export function SettleCard({ groupId, currency, today, members, transfer: t }: P
                   </Button>
                 </div>
               </div>
-            ) : (
-              // Desktop users never tap the link, so this is always here.
-              <div className="grid grid-cols-2 gap-2">
-                <Button variant="outline" className={action} onClick={() => void copyLink(upi.upiId, "UPI ID")}>
-                  <Copy aria-hidden />
-                  Copy UPI ID
-                </Button>
-                {markPaidButton("secondary")}
-              </div>
             )}
+            {/* Desktop users never tap the link, and a failed payment may need the ID again, so this is always here. */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant="outline" className={cn(action, tapped && "col-span-2")} onClick={() => void copyLink(upi.upiId, "UPI ID")}>
+                <Copy aria-hidden />
+                Copy UPI ID
+              </Button>
+              {!tapped && markPaidButton("secondary")}
+            </div>
             <p className="text-sm text-muted-foreground">
               {t.toName}&apos;s UPI ID: <span className="font-medium break-all text-foreground">{upi.upiId}</span>
             </p>

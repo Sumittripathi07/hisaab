@@ -22,6 +22,10 @@ test("pay by UPI, mark as paid, then the payee disputes", async ({ browser }) =>
     "upi://pay?pa=asha@okicici&pn=Asha&am=850.00&cu=INR&tn=Hisaab%3A%20Goa%20Trip",
   );
   await expect(ravi.getByRole("img", { name: "QR code to pay Asha ₹850 by UPI" })).toBeVisible();
+  await expect(ravi.getByRole("button", { name: "Copy UPI ID" })).toBeVisible();
+  await ravi.getByRole("link", { name: "Pay ₹850 via UPI" }).click();
+  await expect(ravi.getByText("Did it go through?")).toBeVisible();
+  await expect(ravi.getByRole("button", { name: "Copy UPI ID" })).toBeVisible(); // still there once the link was tapped
   await ravi.getByRole("button", { name: "Mark as paid" }).dblclick(); // a double tap still records one payment
   await expect(ravi.getByText("All settled up 🎉")).toBeVisible();
 
