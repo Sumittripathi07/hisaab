@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { formatDay, fromDbDate, monthLabel, toDbDate, todayIn } from "./dates";
+import { formatAgo, formatDay, fromDbDate, monthLabel, toDbDate, todayIn } from "./dates";
 
 describe("dates", () => {
   beforeEach(() => {
@@ -18,6 +18,19 @@ describe("dates", () => {
     expect(formatDay("2026-10-23")).toBe("23 Oct");
     expect(formatDay("2026-09-05")).toBe("5 Sep");
     expect(formatDay("2025-10-23")).toBe("23 Oct 2025");
+  });
+
+  it("says how long ago, and gives the day itself after a week", () => {
+    const ago = (seconds: number) => formatAgo(new Date(Date.now() - seconds * 1000));
+    expect(ago(5)).toBe("just now");
+    expect(ago(-30)).toBe("just now"); // a clock a little ahead is not "in 30 seconds"
+    expect(ago(60)).toBe("1 minute ago");
+    expect(ago(59 * 60)).toBe("59 minutes ago");
+    expect(ago(3 * 3600)).toBe("3 hours ago");
+    expect(ago(86400)).toBe("yesterday");
+    expect(ago(3 * 86400)).toBe("3 days ago");
+    expect(ago(7 * 86400)).toBe("15 Oct");
+    expect(formatAgo(new Date("2025-03-02T10:00:00Z"))).toBe("2 Mar 2025");
   });
 
   it("labels a month", () => expect(monthLabel("2026-10-23")).toBe("October 2026"));

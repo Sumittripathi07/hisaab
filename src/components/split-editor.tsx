@@ -162,8 +162,10 @@ const METHODS: { method: SplitMethod; short: string; name: string; chip: string 
 /** The split chip: "Split equally", "Split equally · 3 of 5", "By shares"… */
 export function splitLabel(state: SplitState, members: FormMember[]): string {
   if (state.method !== "EQUAL") return METHODS.find((m) => m.method === state.method)!.chip;
-  const count = members.filter((m) => state.equal.includes(m.id)).length;
-  return count === members.length ? "Split equally" : `Split equally · ${count} of ${members.length}`;
+  // Someone who has left isn't counted: the chip says how many of the people still here are in.
+  const here = members.filter((m) => m.active);
+  const count = here.filter((m) => state.equal.includes(m.id)).length;
+  return count === here.length ? "Split equally" : `Split equally · ${count} of ${here.length}`;
 }
 
 type Props = {
@@ -376,6 +378,7 @@ function Items({ members, currency, items, extras, onChange }: {
                 />
                 <Check aria-hidden className="hidden size-4 peer-checked:block" strokeWidth={3} />
                 {m.displayName}
+                {!m.active && " (left)"}
               </label>
             ))}
           </div>

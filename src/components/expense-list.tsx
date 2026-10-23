@@ -17,6 +17,8 @@ type Props = {
   moreHref: string;
   /** False for an archived group: nothing can be added, so the empty state doesn't offer to. */
   canAdd?: boolean;
+  /** Set while a search or filter is on: an empty list then means "no match", and this is where Clear filters goes. */
+  clearHref?: string;
 };
 
 /** What the viewer lent or owes on one expense, in words as well as colour. */
@@ -27,7 +29,21 @@ function Net({ myNet, currency }: { myNet: bigint; currency: string }) {
 }
 
 /** The group's expenses, newest first under their month, each a link to the expense. Server-rendered: amounts are bigint. */
-export function ExpenseList({ items, currency, groupId, hasMore, moreHref, canAdd = false }: Props) {
+export function ExpenseList({ items, currency, groupId, hasMore, moreHref, canAdd = false, clearHref }: Props) {
+  if (!items.length && clearHref) {
+    return (
+      <div className="flex flex-col items-center rounded-3xl border border-dashed px-6 py-12 text-center sm:py-16">
+        <span aria-hidden className="flex size-14 items-center justify-center rounded-2xl bg-muted text-3xl">
+          🔍
+        </span>
+        <h3 className="mt-4 font-semibold tracking-tight sm:text-lg">No expenses match</h3>
+        <p className="mt-1 max-w-sm text-balance text-muted-foreground">Try a different word, or take a filter off.</p>
+        <Link href={clearHref} className={cn(buttonVariants({ variant: "outline" }), "mt-6 h-12 rounded-xl px-6 text-base")}>
+          Clear filters
+        </Link>
+      </div>
+    );
+  }
   if (!items.length) {
     return (
       <div className="flex flex-col items-center rounded-3xl border border-dashed px-6 py-12 text-center sm:py-16">

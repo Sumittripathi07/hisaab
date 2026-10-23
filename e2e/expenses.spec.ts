@@ -1,5 +1,5 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
-import { addPlaceholderViaUi, createGroupViaUi, signedInPage } from "./helpers";
+import { addExpenseViaUi, addPlaceholderViaUi, createGroupViaUi, inviteAndJoin, signedInPage } from "./helpers";
 
 test("add an expense with the keypad", async ({ browser }) => {
   const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
@@ -135,4 +135,130 @@ test("itemised split shares tax and tip in proportion", async ({ browser }) => {
   await sheet.getByRole("button", { name: "Save", exact: true }).click();
   // Stored as previewed: Asha paid 550 and owes 440.
   await expect(asha.getByRole("link", { name: /Dinner/ })).toContainText("you lent ₹110");
+});
+
+/** Adds "Dinner" for ₹1,200 and opens it. */
+async function openDinner(page: Page, groupName: string) {
+  await createGroupViaUi(page, groupName);
+  await addExpenseViaUi(page, { amount: "1200", description: "Dinner" });
+  await page.getByRole("link", { name: /Dinner/ }).click();
+  await expect(page.getByRole("heading", { name: "Dinner", level: 1 })).toBeVisible();
+}
+
+test("edit, delete and undo", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  await openDinner(asha, "Edit and undo");
+  await expect(asha.getByText("Added by Asha")).toBeVisible();
+
+  await asha.getByRole("button", { name: "Edit", exact: true }).click();
+  const sheet = asha.getByRole("dialog", { name: "Edit expense" });
+  await sheet.getByRole("button", { name: "Change amount" }).click();
+  for (let i = 0; i < "1200".length; i++) await sheet.getByRole("button", { name: "Delete", exact: true }).click();
+  for (const key of "1500") await sheet.getByRole("button", { name: key, exact: true }).click();
+  await sheet.getByRole("button", { name: "Next" }).click();
+  await sheet.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(asha.getByText("Expense saved")).toBeVisible();
+  await expect(asha.getByText("₹1,500").first()).toBeVisible();
+  await expect(asha.getByText("You edited “Dinner”")).toBeVisible();
+  await expect(asha.getByText("amount ₹1,200 → ₹1,500")).toBeVisible();
+
+  // No "are you sure?": the group page says it was deleted, and Undo brings it back.
+  await asha.getByRole("button", { name: "Delete", exact: true }).click();
+  await expect(asha).toHaveURL(/\/groups\/c[^/?]*$/);
+  await expect(asha.getByText("Expense deleted")).toBeVisible();
+  await expect(asha.getByRole("link", { name: /Dinner/ })).toHaveCount(0);
+  await asha.getByRole("button", { name: "Undo" }).click();
+  await expect(asha.getByText("Expense restored")).toBeVisible();
+  await expect(asha.getByRole("link", { name: /Dinner/ })).toContainText("₹1,500");
+});
+
+test("search and filter the expense list", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  await createGroupViaUi(asha, "Search and filter");
+  await addExpenseViaUi(asha, { amount: "300", description: "Dinner" });
+  await addExpenseViaUi(asha, { amount: "450", description: "Uber to airport" });
+  await addExpenseViaUi(asha, { amount: "2000", description: "50% off shoes" });
+  const rows = {
+    dinner: asha.getByRole("link", { name: /Dinner/ }),
+    uber: asha.getByRole("link", { name: /Uber/ }),
+    shoes: asha.getByRole("link", { name: /shoes/ }),
+  };
+
+  // A % in the search means a %, not "anything".
+  const search = asha.getByLabel("Search expenses");
+  await search.fill("50%");
+  await expect(rows.shoes).toBeVisible();
+  await expect(rows.dinner).toHaveCount(0);
+  await expect(rows.uber).toHaveCount(0);
+  await search.fill("zzz");
+  await expect(asha.getByText("No expenses match")).toBeVisible();
+  await asha.getByRole("link", { name: "Clear filters" }).click();
+  await expect(search).toHaveValue("");
+  await expect(rows.dinner).toBeVisible();
+  await expect(rows.uber).toBeVisible();
+  await expect(rows.shoes).toBeVisible();
+
+  await asha.getByRole("button", { name: "Filters", exact: true }).click();
+  await asha.getByRole("dialog", { name: "Filters" }).getByLabel("Category").selectOption("transport");
+  await asha.keyboard.press("Escape");
+  await expect(rows.uber).toBeVisible();
+  await expect(rows.dinner).toHaveCount(0);
+  await expect(rows.shoes).toHaveCount(0);
+
+  // A chip takes its filter off; the sheet's Clear filters takes them all.
+  await expect(asha.getByRole("button", { name: /Remove filter: .*Transport/ })).toBeVisible();
+  await asha.getByRole("button", { name: "Filters", exact: true }).click();
+  await asha.getByRole("dialog", { name: "Filters" }).getByRole("button", { name: "Clear filters" }).click();
+  await asha.keyboard.press("Escape");
+  await expect(rows.dinner).toBeVisible();
+  await expect(rows.uber).toBeVisible();
+  await expect(rows.shoes).toBeVisible();
+  await expect(asha.getByRole("list", { name: "Active filters" })).toHaveCount(0);
+});
+
+test("a stale edit offers a reload", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  const groupUrl = await createGroupViaUi(asha, "Stale edits");
+  // Ravi adds it, so he (who added it) and Asha (the owner) may both edit it.
+  const ravi = await inviteAndJoin(asha, browser, "ravi.expenses@example.test", "Ravi");
+  await addExpenseViaUi(ravi, { amount: "900", description: "Lunch" });
+  await asha.goto(groupUrl);
+  await asha.getByRole("link", { name: /Lunch/ }).click();
+  await ravi.getByRole("link", { name: /Lunch/ }).click();
+  await asha.getByRole("button", { name: "Edit", exact: true }).click();
+  await ravi.getByRole("button", { name: "Edit", exact: true }).click();
+
+  await ravi.getByLabel("Description").fill("Lunch at Taj");
+  await ravi.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(ravi.locator("h1")).toHaveText("Lunch at Taj");
+
+  await asha.getByLabel("Description").fill("Lunch at Leela");
+  await asha.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(asha.getByText("Ravi edited this just now — reload?")).toBeVisible();
+  await asha.getByRole("button", { name: "Reload" }).click();
+  await expect(asha.locator("h1")).toHaveText("Lunch at Taj");
+});
+
+test("comment on an expense", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  await openDinner(asha, "Chatty");
+  const post = asha.getByRole("button", { name: "Post" });
+  await expect(post).toBeDisabled();
+  await asha.getByLabel("Add a comment").fill("Who has the receipt?");
+  await post.click();
+  const comments = asha.getByRole("list", { name: "Comments" });
+  await expect(comments).toContainText("Who has the receipt?");
+  await expect(comments).toContainText("You");
+  await expect(asha.getByLabel("Add a comment")).toHaveValue("");
+
+  await comments.getByRole("button", { name: "Delete comment" }).click();
+  await expect(asha.getByText("No comments yet.")).toBeVisible();
+});
+
+test("outsiders get a 404 for an expense", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  await openDinner(asha, "Private");
+  const mallory = await signedInPage(browser, "mallory.expenses@example.test", "Mallory");
+  await mallory.goto(asha.url());
+  await expect(mallory.getByRole("heading", { name: "We couldn't find that page" })).toBeVisible();
 });

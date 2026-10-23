@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { GroupPageFab } from "@/components/add-expense-fab";
+import { ExpenseFilterBar } from "@/components/expense-filters";
 import { ExpenseList } from "@/components/expense-list";
 import { AddExpenseButton, AddExpenseProvider } from "@/components/expense-sheet";
 import { ArchiveToggle, LeaveGroup } from "@/components/group-actions";
@@ -12,6 +13,7 @@ import { InviteSheet } from "@/components/invite-sheet";
 import { MemberList } from "@/components/member-list";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { parseFilters, toQuery } from "@/lib/expense-filters";
 import { GROUP_TYPES, groupTint, type GroupType } from "@/lib/group-meta";
 import { cn } from "@/lib/utils";
 import { ForbiddenError } from "@/server/errors";
@@ -37,8 +39,10 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
   const link = inviteUrl(group.inviteCode);
   // "Show more" asks for another page's worth; a hand-edited limit is kept within what the list allows.
   const limit = Math.min(MAX_LIMIT, Math.max(PAGE_SIZE, Math.trunc(Number([query.limit].flat()[0])) || PAGE_SIZE));
+  const filters = parseFilters(query);
+  const filtered = Object.keys(filters).length > 0;
   const [{ items, hasMore }, formData] = await Promise.all([
-    listExpenses(user.id, group.id, {}, limit),
+    listExpenses(user.id, group.id, filters, limit),
     archived ? null : getExpenseFormData(user.id, group.id),
   ]);
 
@@ -112,13 +116,18 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
             Expenses
           </h2>
           <GroupTabs groupId={group.id} current="expenses" />
+          {/* A group with nothing in it has nothing to search. */}
+          {(items.length > 0 || filtered) && (
+            <ExpenseFilterBar groupId={group.id} members={members.map((m) => ({ id: m.id, displayName: m.displayName }))} filters={filters} />
+          )}
           <ExpenseList
             items={items}
             currency={group.baseCurrency}
             groupId={group.id}
             hasMore={hasMore}
-            moreHref={`/groups/${group.id}?tab=expenses&limit=${limit + PAGE_SIZE}`}
+            moreHref={`/groups/${group.id}?${toQuery(filters, { tab: "expenses", limit: String(limit + PAGE_SIZE) })}`}
             canAdd={!archived}
+            clearHref={filtered ? `/groups/${group.id}?tab=expenses` : undefined}
           />
         </section>
 

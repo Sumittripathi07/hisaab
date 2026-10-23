@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FormMember } from "@/server/expenses";
-import { initialSplit, previewSplit, toInput, type SplitInput, type SplitState } from "./split-editor";
+import { initialSplit, previewSplit, splitLabel, toInput, type SplitInput, type SplitState } from "./split-editor";
 
 const person = (id: string, displayName: string, active = true): FormMember => ({ id, displayName, image: null, isPlaceholder: false, active });
 // Group order (createdAt, id): Asha first.
@@ -148,5 +148,15 @@ describe("split preview", () => {
       ok: false,
       error: "Enter an amount for “Tea”",
     });
+  });
+});
+
+describe("split chip", () => {
+  it("counts only people still in the group", () => {
+    const withLeft = [...members, person("old", "Old", false)];
+    // Old is on this expense but gone: "2 of 3", not "3 of 4".
+    expect(splitLabel(state({ equal: ["asha", "ravi", "old"] }), withLeft)).toBe("Split equally · 2 of 3");
+    expect(splitLabel(state({ equal: order }), withLeft)).toBe("Split equally");
+    expect(splitLabel(state({ method: "SHARES" }), withLeft)).toBe("By shares");
   });
 });

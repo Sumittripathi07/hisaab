@@ -48,8 +48,16 @@ export function ExpenseSheet({ data, open, onOpenChange, mode, initial }: Props)
       description={DESCRIPTION}
       initialFocus={focusRef}
     >
-      {/* Mounted only while the sheet is, so every opening starts from a clean form. */}
-      <ExpenseFlow data={data} mode={mode} initial={initial} close={() => onOpenChange(false)} focusRef={focusRef} />
+      {/* Mounted only while the sheet is, so every opening starts from a clean form. Keyed by the version being edited, so a
+          refresh that brings someone else's save also brings it into the form. */}
+      <ExpenseFlow
+        key={mode.kind === "edit" ? mode.version : "add"}
+        data={data}
+        mode={mode}
+        initial={initial}
+        close={() => onOpenChange(false)}
+        focusRef={focusRef}
+      />
     </ResponsiveSheet>
   );
 }
@@ -113,7 +121,8 @@ function ExpenseFlow({ data, mode, initial, close, focusRef }: {
   const busy = useRef(false);
   const chips = useRef<Partial<Record<Panel, HTMLButtonElement | null>>>({});
 
-  const [step, setStep] = useState<1 | 2>(mode.kind === "edit" ? 2 : 1);
+  // An edit, or a copy of an expense, starts on the details; its amount is one tap away.
+  const [step, setStep] = useState<1 | 2>(initial ? 2 : 1);
   const [value, setValue] = useState(initial ? typedAmount(initial.amount, digits) : "");
   const [description, setDescription] = useState(initial?.description ?? "");
   // Null until someone picks one: the category then follows what the description suggests.
@@ -174,6 +183,7 @@ function ExpenseFlow({ data, mode, initial, close, focusRef }: {
     if (busy.current || !canSave || !fields) return;
     busy.current = true; // a ref, so a second tap in the same moment sees it before any re-render
     setSaving(another ? "another" : "save");
+    setError(undefined); // last try's message mustn't sit there while this one runs
     let result: ActionResult<unknown>;
     try {
       result = await (mode.kind === "edit"
@@ -183,7 +193,10 @@ function ExpenseFlow({ data, mode, initial, close, focusRef }: {
       result = { ok: false, error: NETWORK_ERROR };
     }
     if (!result.ok) {
-      setError({ message: result.error, input });
+      // Someone saved first: the sheet stays (nothing typed is lost) and "Reload" brings in what they saved.
+      if (result.code === "conflict") {
+        toast.error(result.error, { duration: 10_000, action: { label: "Reload", onClick: () => router.refresh() } });
+      } else setError({ message: result.error, input });
       busy.current = false;
       setSaving(null);
       return;

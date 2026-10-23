@@ -115,3 +115,18 @@ export async function addExpenseViaUi(page: Page, { amount, description }: { amo
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("link", { name: description })).toBeVisible();
 }
+
+/**
+ * Invites someone to the group `owner` is looking at, through its invite link, and returns their own page (a separate
+ * browser) already inside the group.
+ */
+export async function inviteAndJoin(owner: Page, browser: Browser, email: string, name: string): Promise<Page> {
+  await owner.getByRole("button", { name: "Invite people" }).click();
+  const link = await owner.getByLabel("Invite link").inputValue();
+  await owner.keyboard.press("Escape");
+  const member = await signedInPage(browser, email, name);
+  await member.goto(link);
+  await member.getByRole("button", { name: "Join group" }).click();
+  await expect(member).toHaveURL(owner.url());
+  return member;
+}
