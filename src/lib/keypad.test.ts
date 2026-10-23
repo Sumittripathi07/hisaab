@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTyped, pressKey, type KeypadKey } from "./keypad";
+import { formatTyped, fromKeyboard, pressKey, type KeypadKey } from "./keypad";
 
 const type = (keys: string, digits = 2) => [...keys].reduce((v, k) => pressKey(v, k === "<" ? "back" : (k as KeypadKey), digits), "");
 
@@ -17,6 +17,23 @@ describe("the amount keypad", () => {
       expect(type("9".repeat(20) + "." + "9".repeat(20), digits)).toBe(max);
     }
   });
+});
+
+describe("a physical keyboard", () => {
+  const press = (text: string) => [...text].reduce((v, ch) => {
+    const key = fromKeyboard({ key: ch, code: ch === "," ? "Comma" : "" });
+    return key ? pressKey(v, key, 2) : v;
+  }, "");
+
+  it("ignores a typed thousands separator instead of reading it as the point", () => {
+    expect(press("12,500")).toBe("12500");
+    expect(press("1,23,456.78")).toBe("123456.78");
+  });
+
+  it.each([
+    [{ key: ",", code: "NumpadDecimal" }, "."], [{ key: ".", code: "Period" }, "."], [{ key: ".", code: "NumpadDecimal" }, "."],
+    [{ key: ",", code: "Comma" }, null], [{ key: "7", code: "Digit7" }, "7"], [{ key: "Backspace", code: "Backspace" }, "back"], [{ key: "a", code: "KeyA" }, null],
+  ])("maps %j to %j", (event, out) => expect(fromKeyboard(event)).toBe(out));
 });
 
 describe("the typed amount, as shown", () => {

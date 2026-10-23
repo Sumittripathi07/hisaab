@@ -2,6 +2,16 @@ import { formatDecimal, formatMoney, minorDigits } from "@/lib/money/format";
 
 export type KeypadKey = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "." | "back";
 
+/**
+ * A physical key as a keypad key. Only the numpad's decimal key types "," for the point on some layouts; a "," typed
+ * anywhere else is a thousands separator ("12,500"), so it's ignored rather than read as the fraction.
+ */
+export function fromKeyboard({ key, code }: { key: string; code: string }): KeypadKey | null {
+  if (/^[0-9]$/.test(key)) return key as KeypadKey;
+  if (key === "." || (key === "," && code === "NumpadDecimal")) return ".";
+  return key === "Backspace" ? "back" : null;
+}
+
 /** MAX_AMOUNT (99,999,999,999 minor units) has 11 digits, however they split between whole and fraction. */
 const MAX_DIGITS = 11;
 

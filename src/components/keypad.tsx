@@ -3,13 +3,9 @@
 import { Delete } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import type { KeypadKey } from "@/lib/keypad";
+import { fromKeyboard, type KeypadKey } from "@/lib/keypad";
 
 const KEYS: KeypadKey[] = ["1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "back"];
-
-/** A character on a physical keyboard, as a key; the numpad of some layouts types "," for the point. */
-const fromKeyboard = (key: string): KeypadKey | null =>
-  /^[0-9]$/.test(key) ? (key as KeypadKey) : key === "." || key === "," ? "." : key === "Backspace" ? "back" : null;
 
 type Props = {
   onKey: (key: KeypadKey) => void;
@@ -32,7 +28,7 @@ export function Keypad({ onKey, onEnter, decimal }: Props) {
         }
         return;
       }
-      const key = fromKeyboard(e.key);
+      const key = fromKeyboard(e);
       if (!key) return;
       e.preventDefault();
       onKey(key);
