@@ -338,7 +338,7 @@ export async function transferOwnership(userId: string, memberId: string): Promi
   });
 }
 
-/** Archived groups can be left too: leaving is how someone clears one from their list. */
+/** Archived groups can be left too, but like any group only with a zero balance: leaving never writes off what's owed. */
 export async function leaveGroup(userId: string, groupId: string): Promise<void> {
   const { member, group } = await requireMember(userId, groupId);
   if (member.role === "OWNER") throw new UserError("Transfer ownership before leaving.");
