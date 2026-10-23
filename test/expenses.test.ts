@@ -172,6 +172,16 @@ describe("editing", () => {
     expect(await db.expense.findUniqueOrThrow({ where: { id } })).toMatchObject({ description: "Dinner at Thalassa", version: 2 });
   });
 
+  it("tells someone who raced their own earlier save that it was them", async () => {
+    const { id } = await createExpense(asha.id, input());
+    await updateExpense(asha.id, id, 1, fields({ description: "Dinner at Thalassa" }));
+
+    const stale = updateExpense(asha.id, id, 1, fields({ description: "Lunch" }));
+    await expect(stale).rejects.toThrow(ConflictError);
+    await expect(stale).rejects.toThrow("You edited this just now — reload?");
+    expect((await db.expense.findUniqueOrThrow({ where: { id } })).description).toBe("Dinner at Thalassa");
+  });
+
   it("lets exactly one of two simultaneous edits through", async () => {
     const { id } = await createExpense(asha.id, input());
     await db.groupMember.update({ where: { id: raviM.id }, data: { role: "ADMIN" } });

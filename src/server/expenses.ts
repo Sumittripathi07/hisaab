@@ -138,16 +138,17 @@ function changesBetween(
   return fieldsAndValues.filter(([, changed]) => changed).map(([field, , before, after]) => ({ field, before, after }));
 }
 
-/** Why a save against `version` matched nothing: the expense was deleted, or someone saved first. */
-async function staleSaveError(tx: Prisma.TransactionClient, expenseId: string): Promise<UserError> {
+/** Why a save against `version` matched nothing: the expense was deleted, or someone saved first (maybe `memberId` itself, from another tab). */
+async function staleSaveError(tx: Prisma.TransactionClient, expenseId: string, memberId: string): Promise<UserError> {
   const { deletedAt } = await tx.expense.findUniqueOrThrow({ where: { id: expenseId }, select: { deletedAt: true } });
   if (deletedAt) return new UserError(DELETED);
   const latest = await tx.activity.findFirst({
     where: { entityId: expenseId, kind: { startsWith: "expense." } },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    select: { actor: { select: { displayName: true } } },
+    select: { actorMemberId: true, actor: { select: { displayName: true } } },
   });
-  return new ConflictError(`${latest?.actor.displayName ?? "Someone"} edited this just now — reload?`);
+  const editor = latest?.actorMemberId === memberId ? "You" : (latest?.actor.displayName ?? "Someone");
+  return new ConflictError(`${editor} edited this just now — reload?`);
 }
 
 export async function createExpense(userId: string, input: ExpenseInput): Promise<{ id: string }> {
@@ -202,7 +203,7 @@ export async function updateExpense(
       where: { id: expenseId, version, deletedAt: null },
       data: { ...columns(fields, split, currency), version: { increment: 1 } },
     });
-    if (count === 0) throw await staleSaveError(tx, expenseId);
+    if (count === 0) throw await staleSaveError(tx, expenseId, member.id);
     await tx.expense.update({
       where: { id: expenseId },
       data: { payers: { deleteMany: {}, create: rows(fields.payers) }, shares: { deleteMany: {}, create: rows(shares) } },
