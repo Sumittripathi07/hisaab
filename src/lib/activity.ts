@@ -121,7 +121,7 @@ export function describeActivity(a: ActivityView): ActivityText {
     case "settlement.restored":
       return plain(`${actor} ${PAYMENT_VERB[a.kind]} a payment from ${who(a.payload.fromMemberId)} to ${who(a.payload.toMemberId)}`);
     case "comment.created":
-      return { title: `${actor} commented on “${a.payload.targetLabel}”`, detail: a.payload.excerpt, money: null };
+      return { title: `${actor} commented on “${a.payload.targetLabel}”`, detail: a.payload.excerpt || null, money: null };
     case "member.joined":
       return plain(`${actor} joined the group`);
     case "member.left":

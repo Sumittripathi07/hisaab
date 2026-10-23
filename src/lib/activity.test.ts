@@ -89,14 +89,15 @@ describe("describeActivity", () => {
   });
 
   it("describes comments and members", () => {
+    const comment0 = () => ({ kind: "comment.created" as const, actorMemberId: "r", viewerMemberId: "a", ...base });
     const comment = describeActivity({
-      kind: "comment.created",
-      actorMemberId: "r",
-      viewerMemberId: "a",
-      ...base,
+      ...comment0(),
       payload: { targetKind: "expense", targetId: "e1", targetLabel: "Dinner at Thalassa", excerpt: "Did we include the tip?" },
     });
     expect(comment).toEqual({ title: "Ravi commented on “Dinner at Thalassa”", detail: "Did we include the tip?", money: null });
+    // a deleted comment's row keeps its title but loses the text
+    const deleted = describeActivity({ ...comment0(), payload: { targetKind: "expense", targetId: "e1", targetLabel: "Dinner at Thalassa", excerpt: "" } });
+    expect(deleted).toEqual({ title: "Ravi commented on “Dinner at Thalassa”", detail: null, money: null });
 
     const member = (kind: "member.joined" | "member.added" | "member.left" | "member.removed", viewer = "p") =>
       describeActivity({ kind, actorMemberId: "a", viewerMemberId: viewer, ...base, payload: { memberId: "x", displayName: "Rahul" } });

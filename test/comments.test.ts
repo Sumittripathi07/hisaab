@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { db } from "@/lib/db";
+import { describeActivity } from "@/lib/activity";
+import { listGroupActivity } from "@/server/activity";
 import { addCommentAction, deleteCommentAction } from "@/server/actions/comments";
 import { addComment, deleteComment, listComments } from "@/server/comments";
 import { ForbiddenError, UserError } from "@/server/errors";
@@ -155,6 +157,17 @@ describe("deleteComment", () => {
     expect(await isDeleted()).toBe(true);
     expect(await listComments(ravi.id, onExpense())).toEqual([]);
     expect(await activityOf()).toEqual([]);
+  });
+
+  it("takes the excerpt out of the feed, keeping the row", async () => {
+    const { id } = await addComment(ravi.id, onExpense(), "Did we include the tip?");
+    await addComment(meera.id, onExpense(), "Yes, 10%");
+    await deleteComment(ravi.id, id);
+
+    const feed = (await listGroupActivity(asha.id, g.id)).items.filter((i) => i.kind === "comment.created");
+    expect(feed.map((i) => describeActivity(i).detail).sort()).toEqual(["Yes, 10%", null]);
+    expect(describeActivity(feed.find((i) => i.entityId === id)!).title).toBe("Ravi commented on “Dinner at Thalassa”");
+    expect(JSON.stringify(await activityOf())).not.toContain("include the tip");
   });
 
   it("refuses another member", async () => {

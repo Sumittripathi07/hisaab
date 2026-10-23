@@ -50,11 +50,18 @@ export async function addComment(userId: string, target: CommentTarget, body: st
   });
 }
 
-/** A soft delete, conditional on it still being there, so a second tap changes nothing. Leaves no activity. */
+/**
+ * A soft delete, conditional on it still being there, so a second tap changes nothing. Leaves no new activity, but the
+ * comment's own "commented" row loses its excerpt in the same transaction: the feed must not keep what was deleted.
+ */
 export async function deleteComment(userId: string, commentId: string): Promise<void> {
   const { member, row } = await requireMemberFor(userId, "comment", commentId, { write: true });
   if (row.authorMemberId !== member.id && !isAdmin(member)) throw new UserError("Only the author or an admin can delete this comment.");
-  await db.comment.updateMany({ where: { id: commentId, deletedAt: null }, data: { deletedAt: new Date() } });
+  await db.$transaction(async (tx) => {
+    await tx.comment.updateMany({ where: { id: commentId, deletedAt: null }, data: { deletedAt: new Date() } });
+    const logged = await tx.activity.findFirst({ where: { entityId: commentId, kind: "comment.created" }, select: { id: true, payload: true } });
+    if (logged) await tx.activity.update({ where: { id: logged.id }, data: { payload: { ...(logged.payload as object), excerpt: "" } } });
+  });
 }
 
 /** Oldest first. A deleted expense's comments are still readable here; the page decides whether to show them. */
