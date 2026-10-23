@@ -6,7 +6,7 @@ running on Google Cloud Run with scale-to-zero.
 
 Full design: [`docs/superpowers/specs/2026-10-22-hisaab-design.md`](docs/superpowers/specs/2026-10-22-hisaab-design.md).
 
-## What works today (Phase 1)
+## What works today (Phase 2)
 
 - **Sign in** with Google or an email magic link. No passwords. The same email via either route is one account.
 - **Onboarding** on first sign-in: name, default currency, optional UPI ID.
@@ -20,9 +20,20 @@ Full design: [`docs/superpowers/specs/2026-10-22-hisaab-design.md`](docs/superpo
   regenerate it.
 - **Roles**: owner, admin, member. Admins remove members, the owner transfers ownership, and a group can never end up
   ownerless.
-- **App shell**: bottom nav on phones, sidebar on desktop, dashboard with your groups.
+- **App shell**: bottom nav on phones, sidebar on desktop, dashboard with your groups and what you owe and are owed.
+- **Expenses and splits**: add one on a keypad in two taps, then split it equally, by exact amounts, percentages,
+  shares or itemised (tax and tip are shared in proportion to each person's items), with +/− adjustments and one or
+  several payers. Search and filter, edit (a stale edit says "reload?" rather than overwriting), duplicate, and delete
+  with undo. Money is exact minor units end to end: no floats, and an odd paisa always lands on the same person.
+- **Balances and simplification**: who is owed and who owes, per group, with debts simplified to the fewest payments
+  (switch it off to see pairwise debts). Leaving a group with a balance asks you to settle first.
+- **UPI settle-up and disputes**: "Pay ₹850 via UPI" opens GPay or PhonePe with the amount and note filled in, with a
+  QR code for another phone. "Mark as paid" records it (or record cash and bank transfers by hand); the payee can say
+  they never received it, and the balance comes back.
+- **Activity and comments**: a feed per group and a personal one that says what you owe or get back, and comments on
+  expenses and payments.
 
-Expenses, balances and settle-up are Phase 2. See the [roadmap](#roadmap).
+See the [roadmap](#roadmap) for what's next.
 
 ## Tech stack
 
@@ -124,8 +135,7 @@ Each phase ends deployed and working. Details in the [design spec](docs/superpow
 
 | Phase | Scope |
 |---|---|
-| 0, 1 | Done: foundations and deploy; auth, profiles, groups, invites |
-| 2 | **Money core**: expenses with all split methods and multiple payers, balances, simplified debts, settle-up with UPI deep link/QR, disputes, activity log, undo, comments |
+| 0, 1, 2 | Done: foundations and deploy; auth, profiles, groups, invites; **money core** (expenses with all split methods and multiple payers, balances, simplified debts, settle-up with UPI deep link/QR, disputes, activity log, undo, comments) |
 | 3 | **Real-time and notifications**: live updates over SSE, notification centre, web push, PWA install, email notifications |
 | 4 | **Multi-currency and AI receipts**: live FX rates, per-expense currency, receipt photos parsed into itemised splits |
 | 5 | **Recurring and reminders**: recurring expenses on a schedule, weekly digest, Cloud Scheduler jobs |
