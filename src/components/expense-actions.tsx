@@ -5,10 +5,9 @@ import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 import { toast } from "sonner";
 import { ExpenseSheet } from "@/components/expense-sheet";
-import { NETWORK_ERROR } from "@/components/profile-fields";
+import { settle } from "@/components/profile-fields";
 import { Button } from "@/components/ui/button";
 import type { ExpenseFormValues } from "@/lib/validation";
-import type { ActionResult } from "@/server/action";
 import { deleteExpenseAction, restoreExpenseAction } from "@/server/actions/expenses";
 import type { ExpenseFormData } from "@/server/expenses";
 
@@ -22,8 +21,6 @@ type Props = {
   /** Edit and Delete: the person who added it, or an admin. Duplicate is for any member. */
   canEdit: boolean;
 };
-
-const settle = (action: () => Promise<ActionResult<unknown>>) => action().catch(() => ({ ok: false as const, error: NETWORK_ERROR }));
 
 const button = "h-11 flex-1 rounded-xl text-base sm:flex-none sm:px-5";
 

@@ -4,11 +4,10 @@ import { LoaderCircle, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
-import { NETWORK_ERROR } from "@/components/profile-fields";
+import { settle } from "@/components/profile-fields";
 import { UserAvatar } from "@/components/user-avatar";
 import { Button } from "@/components/ui/button";
 import type { CommentView } from "@/lib/comment-view";
-import type { ActionResult } from "@/server/action";
 import { addCommentAction, deleteCommentAction } from "@/server/actions/comments";
 import type { CommentTarget } from "@/server/comments";
 
@@ -20,8 +19,6 @@ type Props = {
   /** False in an archived group, where the thread can be read but not added to. */
   canComment: boolean;
 };
-
-const settle = (action: () => Promise<ActionResult<unknown>>) => action().catch(() => ({ ok: false as const, error: NETWORK_ERROR }));
 
 /** The comments on an expense or a payment, oldest first, with a box to add one. */
 export function CommentThread({ target, comments, canComment }: Props) {

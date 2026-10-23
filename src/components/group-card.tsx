@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { UserAvatar } from "@/components/user-avatar";
+import { cardLine, TONE_CLASS } from "@/lib/balance-text";
 import { GROUP_TYPES, groupTint, type GroupType } from "@/lib/group-meta";
 import { cn } from "@/lib/utils";
 import type { GroupListItem } from "@/server/groups";
@@ -9,6 +10,7 @@ const members = (n: number) => (n === 1 ? "1 member" : `${n} members`);
 
 export function GroupCard({ group }: { group: GroupListItem }) {
   const extra = group.memberCount - group.previewMembers.length;
+  const balance = cardLine(group.myNet, group.baseCurrency);
   return (
     <Link
       href={`/groups/${group.id}`}
@@ -41,7 +43,11 @@ export function GroupCard({ group }: { group: GroupListItem }) {
             </span>
           )}
         </div>
-        <span className="text-xs font-semibold tracking-wider text-muted-foreground">{group.baseCurrency}</span>
+        {/* In words as well as colour. */}
+        <span className="min-w-0 text-right">
+          <span className={cn("block truncate text-sm font-semibold tabular-nums", TONE_CLASS[balance.tone])}>{balance.text}</span>
+          <span className="block text-xs font-semibold tracking-wider text-muted-foreground">{group.baseCurrency}</span>
+        </span>
       </div>
     </Link>
   );

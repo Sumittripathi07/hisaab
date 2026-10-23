@@ -43,20 +43,21 @@ export async function signInWithMagicLink(page: Page, email: string): Promise<vo
 }
 
 /**
- * Onboarding with just a name. Someone headed somewhere (an invite link) is then taken there; anyone else gets the
- * "You're all set" step, with its "Go to dashboard".
+ * Onboarding with a name, and a UPI ID if given. Someone headed somewhere (an invite link) is then taken there; anyone
+ * else gets the "You're all set" step, with its "Go to dashboard".
  */
-export async function completeOnboardingUi(page: Page, name: string): Promise<void> {
+export async function completeOnboardingUi(page: Page, name: string, upiId?: string): Promise<void> {
   await expect(page).toHaveURL(/\/onboarding/);
   await page.getByLabel("Your name").fill(name);
   await page.getByRole("button", { name: "Continue" }).click();
+  if (upiId) await page.getByLabel("UPI ID (optional)").fill(upiId);
   await page.getByRole("button", { name: "Continue" }).click();
 }
 
-/** Signs in as someone new and finishes onboarding with just a name, landing on the dashboard. */
-export async function signInAndOnboard(page: Page, email: string, name: string): Promise<void> {
+/** Signs in as someone new and finishes onboarding with a name (and a UPI ID, if given), landing on the dashboard. */
+export async function signInAndOnboard(page: Page, email: string, name: string, { upiId }: { upiId?: string } = {}): Promise<void> {
   await signInWithMagicLink(page, email);
-  await completeOnboardingUi(page, name);
+  await completeOnboardingUi(page, name, upiId);
   await page.getByRole("button", { name: "Go to dashboard" }).click();
   await expect(page).toHaveURL(/\/dashboard$/);
 }
@@ -84,11 +85,12 @@ export function useUpInviteLimit(email: string): void {
   );
 }
 
-/** Creates a group from the sidebar (desktop) and returns its page's URL. */
-export async function createGroupViaUi(page: Page, name: string): Promise<string> {
+/** Creates a group from the sidebar (desktop), in `currency` if given (else the person's default), and returns its page's URL. */
+export async function createGroupViaUi(page: Page, name: string, currency?: string): Promise<string> {
   await page.goto("/dashboard");
   await page.getByRole("button", { name: "New group" }).click();
   await page.getByLabel("Group name").fill(name);
+  if (currency) await page.getByLabel("Currency").selectOption(currency);
   await page.getByRole("button", { name: "Create group" }).click();
   await expect(page).toHaveURL(/\/groups\/c/);
   await expect(page.getByRole("heading", { name, level: 1 })).toBeVisible();
@@ -118,7 +120,8 @@ export async function addExpenseViaUi(page: Page, { amount, description }: { amo
 
 /**
  * Invites someone to the group `owner` is looking at, through its invite link, and returns their own page (a separate
- * browser) already inside the group.
+ * browser) already inside the group. The owner's page is reloaded, so it knows the new member (an expense added there
+ * is then split with them).
  */
 export async function inviteAndJoin(owner: Page, browser: Browser, email: string, name: string): Promise<Page> {
   await owner.getByRole("button", { name: "Invite people" }).click();
@@ -128,5 +131,6 @@ export async function inviteAndJoin(owner: Page, browser: Browser, email: string
   await member.goto(link);
   await member.getByRole("button", { name: "Join group" }).click();
   await expect(member).toHaveURL(owner.url());
+  await owner.reload();
   return member;
 }

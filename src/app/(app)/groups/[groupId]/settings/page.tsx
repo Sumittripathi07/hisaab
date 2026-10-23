@@ -48,7 +48,7 @@ export default async function GroupSettingsPage({ params }: PageProps<"/groups/[
   );
   if (!allowed) return <NoAccess />;
 
-  const { group, me, members } = await getGroupDetail(user.id, groupId);
+  const { group, me, members, currencyLocked } = await getGroupDetail(user.id, groupId);
   const archived = group.archivedAt !== null;
   const isOwner = me.role === "OWNER";
   const ownerHint = !isOwner
@@ -86,6 +86,7 @@ export default async function GroupSettingsPage({ params }: PageProps<"/groups/[
             <GroupDetailsForm
               groupId={group.id}
               currencies={currencyOptions(group.baseCurrency)}
+              currencyLocked={currencyLocked}
               defaultValues={{
                 name: group.name,
                 emoji: group.emoji,

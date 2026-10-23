@@ -14,14 +14,14 @@ import { cn } from "@/lib/utils";
 import { displayNameSchema } from "@/lib/validation";
 import { addPlaceholderAction } from "@/server/actions/members";
 
-/** Copies a link to the clipboard and says so. False when the browser refused (no permission, or not https). */
-export async function copyLink(url: string): Promise<boolean> {
+/** Copies text (a link, by default) to the clipboard and says so. False when the browser refused (no permission, or not https). */
+export async function copyLink(text: string, noun = "link"): Promise<boolean> {
   try {
-    await navigator.clipboard.writeText(url);
-    toast.success("Link copied");
+    await navigator.clipboard.writeText(text);
+    toast.success(`${noun[0].toUpperCase()}${noun.slice(1)} copied`);
     return true;
   } catch {
-    toast.error("Couldn't copy the link, so here it is to copy yourself", { description: url });
+    toast.error(`Couldn't copy the ${noun}, so here it is to copy yourself`, { description: text });
     return false;
   }
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { GroupPageFab } from "@/components/add-expense-fab";
+import { BalancePanel } from "@/components/balance-panel";
 import { ExpenseFilterBar } from "@/components/expense-filters";
 import { ExpenseList } from "@/components/expense-list";
 import { AddExpenseButton, AddExpenseProvider } from "@/components/expense-sheet";
@@ -16,11 +17,13 @@ import { buttonVariants } from "@/components/ui/button";
 import { parseFilters, toQuery } from "@/lib/expense-filters";
 import { GROUP_TYPES, groupTint, type GroupType } from "@/lib/group-meta";
 import { cn } from "@/lib/utils";
+import { getGroupBalances } from "@/server/balances";
 import { ForbiddenError } from "@/server/errors";
 import { getExpenseFormData, listExpenses } from "@/server/expenses";
 import { getGroupDetail } from "@/server/groups";
 import { claimUrl, inviteUrl } from "@/server/members";
 import { requireOnboardedUser } from "@/server/session";
+import { listSettlements } from "@/server/settlements";
 
 export const metadata: Metadata = { title: "Group · Hisaab" };
 
@@ -41,8 +44,11 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
   const limit = Math.min(MAX_LIMIT, Math.max(PAGE_SIZE, Math.trunc(Number([query.limit].flat()[0])) || PAGE_SIZE));
   const filters = parseFilters(query);
   const filtered = Object.keys(filters).length > 0;
-  const [{ items, hasMore }, formData] = await Promise.all([
-    listExpenses(user.id, group.id, filters, limit),
+  const tab = [query.tab].flat()[0] === "balances" ? "balances" : "expenses";
+  // Only the tab on show is read; the add-expense sheet is on both.
+  const [expenses, balances, formData] = await Promise.all([
+    tab === "expenses" ? listExpenses(user.id, group.id, filters, limit) : null,
+    tab === "balances" ? Promise.all([getGroupBalances(user.id, group.id), listSettlements(user.id, group.id)]) : null,
     archived ? null : getExpenseFormData(user.id, group.id),
   ]);
 
@@ -111,24 +117,29 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
       )}
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-        <section aria-labelledby="expenses-heading" className="min-w-0 space-y-4">
-          <h2 id="expenses-heading" className="sr-only">
-            Expenses
+        <section aria-labelledby="tab-heading" className="min-w-0 space-y-4">
+          <h2 id="tab-heading" className="sr-only">
+            {tab === "balances" ? "Balances" : "Expenses"}
           </h2>
-          <GroupTabs groupId={group.id} current="expenses" />
-          {/* A group with nothing in it has nothing to search. */}
-          {(items.length > 0 || filtered) && (
-            <ExpenseFilterBar groupId={group.id} members={members.map((m) => ({ id: m.id, displayName: m.displayName }))} filters={filters} />
+          <GroupTabs groupId={group.id} current={tab} />
+          {balances && <BalancePanel groupId={group.id} balances={balances[0]} settlements={balances[1]} archived={archived} />}
+          {expenses && (
+            <>
+              {/* A group with nothing in it has nothing to search. */}
+              {(expenses.items.length > 0 || filtered) && (
+                <ExpenseFilterBar groupId={group.id} members={members.map((m) => ({ id: m.id, displayName: m.displayName }))} filters={filters} />
+              )}
+              <ExpenseList
+                items={expenses.items}
+                currency={group.baseCurrency}
+                groupId={group.id}
+                hasMore={expenses.hasMore}
+                moreHref={`/groups/${group.id}?${toQuery(filters, { tab: "expenses", limit: String(limit + PAGE_SIZE) })}`}
+                canAdd={!archived}
+                clearHref={filtered ? `/groups/${group.id}?tab=expenses` : undefined}
+              />
+            </>
           )}
-          <ExpenseList
-            items={items}
-            currency={group.baseCurrency}
-            groupId={group.id}
-            hasMore={hasMore}
-            moreHref={`/groups/${group.id}?${toQuery(filters, { tab: "expenses", limit: String(limit + PAGE_SIZE) })}`}
-            canAdd={!archived}
-            clearHref={filtered ? `/groups/${group.id}?tab=expenses` : undefined}
-          />
         </section>
 
         <section aria-labelledby="members-heading" className="space-y-3">
