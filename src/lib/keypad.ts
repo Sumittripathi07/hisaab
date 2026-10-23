@@ -1,4 +1,4 @@
-import { formatMoney, minorDigits } from "@/lib/money/format";
+import { formatDecimal, formatMoney, minorDigits } from "@/lib/money/format";
 
 export type KeypadKey = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "." | "back";
 
@@ -23,4 +23,10 @@ export function formatTyped(value: string, currency: string): string {
   const [whole, fraction] = value.split(".");
   const shown = formatMoney(BigInt(whole || "0") * 10n ** BigInt(minorDigits(currency)), currency);
   return fraction === undefined ? shown : `${shown}.${fraction}`;
+}
+
+/** Minor units as they'd have been typed: "120000" → "1200", "1250" → "12.5", "-500" → "-5" (at 2 digits). */
+export function typedAmount(minor: string, digits: number): string {
+  const text = formatDecimal(BigInt(minor), digits);
+  return text.includes(".") ? text.replace(/\.?0+$/, "") : text;
 }
