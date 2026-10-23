@@ -78,6 +78,11 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # One deploy at a time, in push order: back-to-back merges queue instead of racing (an older SHA finishing last
+    # would roll production back). A newer push replaces any deploy still waiting in the queue.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
       contents: read
