@@ -21,7 +21,7 @@ Full design: [`docs/superpowers/specs/2026-10-22-hisaab-design.md`](docs/superpo
 - **Roles**: owner, admin, member. Admins remove members, the owner transfers ownership, and a group can never end up
   ownerless.
 - **App shell**: bottom nav on phones, sidebar on desktop, dashboard with your groups and what you owe and are owed.
-- **Expenses and splits**: add one on a keypad in two taps, then split it equally, by exact amounts, percentages,
+- **Expenses and splits**: add one on a keypad in seconds, then split it equally, by exact amounts, percentages,
   shares or itemised (tax and tip are shared in proportion to each person's items), with +/− adjustments and one or
   several payers. Search and filter, edit (a stale edit says "reload?" rather than overwriting), duplicate, and delete
   with undo. Money is exact minor units end to end: no floats, and an odd paisa always lands on the same person.
