@@ -11,6 +11,9 @@ const schema = z.object({
   BETTER_AUTH_URL: z.url({ protocol: /^https?$/ }),
   GOOGLE_CLIENT_ID: z.string().min(1),
   GOOGLE_CLIENT_SECRET: z.string().min(1),
+  // Shared with the Cloudflare Worker (infra/cloudflare-worker), which sends it on every request. When set, src/proxy.ts
+  // refuses any request without it, so only the custom domain reaches the app. Unset or empty (local dev, tests): off.
+  PROXY_SECRET: z.literal("").or(z.string().min(32)).optional(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 

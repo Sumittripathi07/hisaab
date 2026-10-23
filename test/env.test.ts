@@ -31,6 +31,14 @@ describe("parseEnv", () => {
     expect(() => parseEnv({ ...valid, GOOGLE_CLIENT_ID: undefined })).toThrow(/GOOGLE_CLIENT_ID/);
     expect(() => parseEnv({ ...valid, GOOGLE_CLIENT_SECRET: undefined })).toThrow(/GOOGLE_CLIENT_SECRET/);
   });
+  it("leaves the proxy gate off unless PROXY_SECRET is set", () => {
+    expect(parseEnv(valid).PROXY_SECRET).toBeUndefined();
+    expect(parseEnv({ ...valid, PROXY_SECRET: "" }).PROXY_SECRET).toBe("");
+    expect(parseEnv({ ...valid, PROXY_SECRET: "f".repeat(64) }).PROXY_SECRET).toBe("f".repeat(64));
+  });
+  it("rejects a PROXY_SECRET shorter than 32 characters", () => {
+    expect(() => parseEnv({ ...valid, PROXY_SECRET: "short" })).toThrow(/PROXY_SECRET/);
+  });
   it("defaults EMAIL_FROM", () => {
     expect(parseEnv(valid).EMAIL_FROM).toBe("Hisaab <no-reply@hisaab.local>");
   });

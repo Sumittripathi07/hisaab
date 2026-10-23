@@ -75,7 +75,7 @@ if gcloud sql databases describe hisaab --instance="$INSTANCE" "${P[@]}" >/dev/n
 else step "database hisaab"; gcloud sql databases create hisaab --instance="$INSTANCE" "${P[@]}"; fi
 
 # --- Secrets. A version is only added when the secret has none, so re-runs never rotate.
-for s in HISAAB_DATABASE_URL HISAAB_BETTER_AUTH_SECRET; do
+for s in HISAAB_DATABASE_URL HISAAB_BETTER_AUTH_SECRET HISAAB_PROXY_SECRET; do
   if gcloud secrets describe "$s" "${P[@]}" >/dev/null 2>&1; then skip "secret $s"
   else step "secret $s"; gcloud secrets create "$s" --replication-policy=automatic "${P[@]}"; fi
 done
@@ -111,6 +111,14 @@ else
   openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add HISAAB_BETTER_AUTH_SECRET --data-file=- "${P[@]}"
 fi
 
+# Shared by the Cloudflare Worker (it sends it on every request) and the app's proxy gate (PROXY_SECRET). The Worker's
+# copy is set from this secret (infra/cloudflare-worker/README.md). Never printed.
+if has_version HISAAB_PROXY_SECRET; then skip "secret HISAAB_PROXY_SECRET version"
+else
+  step "secret HISAAB_PROXY_SECRET version"
+  openssl rand -hex 32 | tr -d '\n' | gcloud secrets versions add HISAAB_PROXY_SECRET --data-file=- "${P[@]}"
+fi
+
 # --- Service accounts + roles
 for sa in hisaab-run hisaab-deployer; do
   if gcloud iam service-accounts describe "$sa@$PROJECT_ID.iam.gserviceaccount.com" "${P[@]}" >/dev/null 2>&1; then skip "service account $sa"
@@ -132,6 +140,7 @@ bind projects "$PROJECT_ID" "serviceAccount:$DEPLOYER_SA" roles/artifactregistry
 # Secret access is per secret, not project-wide: other apps' secrets live in this project too.
 bind secrets HISAAB_DATABASE_URL "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
 bind secrets HISAAB_BETTER_AUTH_SECRET "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
+bind secrets HISAAB_PROXY_SECRET "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor
 for s in "${OWNER_SECRETS[@]}"; do bind secrets "$s" "serviceAccount:$RUN_SA" roles/secretmanager.secretAccessor; done
 bind "iam service-accounts" "$RUN_SA" "serviceAccount:$DEPLOYER_SA" roles/iam.serviceAccountUser
 

@@ -9,6 +9,17 @@ import { EmailRateLimitError, sendEmail } from "@/lib/email";
 import { env } from "@/lib/env";
 import { signUpName } from "@/lib/validation";
 
+// Cloudflare's published ranges, https://www.cloudflare.com/ips-v4 and https://www.cloudflare.com/ips-v6, fetched
+// 2026-10-23. Workers' outbound requests leave from these. Update when Cloudflare announces a change.
+const CLOUDFLARE_IPS = [
+  "173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22", "141.101.64.0/18", "108.162.192.0/18",
+  "190.93.240.0/20", "188.114.96.0/20", "197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+  "104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+  "2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32", "2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+];
+// Google's documented load balancer / health check ranges.
+const GOOGLE_LB_IPS = ["130.211.0.0/22", "35.191.0.0/16"];
+
 export const auth = betterAuth({
   baseURL: env.BETTER_AUTH_URL,
   secret: env.BETTER_AUTH_SECRET,
@@ -40,12 +51,20 @@ export const auth = betterAuth({
     // Per-IP rate limiting and session IP tracking. With no trustedProxies, Better Auth refuses any multi-value
     // X-Forwarded-For and every request lands in one shared "no-trusted-ip" bucket. With them, it walks the header from
     // the right, skips these hops, and takes the first other address. Never the left-most, which clients can spoof.
-    // ASSUMPTION, to verify after the first deploy (log getIP for a request from a known address): on run.app, Google's
-    // front end appends the real client IP as the right-most entry and adds no hop of its own after it.
+    // The path in production: browser → Cloudflare Worker (infra/cloudflare-worker) → Cloud Run. The Worker drops any
+    // client-sent X-Forwarded-For and sets it to CF-Connecting-IP, the address Cloudflare saw. Google's front end then
+    // appends the address the request reached it from, the Worker's Cloudflare egress IP, so the app sees
+    // "client, cloudflare-egress": walking from the right skips Cloudflare and lands on the client.
+    // That is only sound while the proxy gate is on (PROXY_SECRET, src/proxy.ts), so Cloudflare's ranges are trusted only
+    // then. Without the gate, anyone could call run.app from a Worker of their own with a made-up left entry, minting a
+    // fresh rate-limit key per request.
+    // Gate off, a request through the Worker keys on its Cloudflare egress address instead: coarse, but not forgeable.
+    // ASSUMPTION, to verify once the Worker is live (log getIP for a request from a known address): Google's front end
+    // appends the connecting address as the right-most entry and adds no hop of its own after it.
     // Revisit if an external HTTPS load balancer is added: it appends its own IP, outside these trusted ranges, so every
-    // request would key on the load balancer's address. These are Google's documented load balancer / health check
-    // ranges. Keep them narrow: a broad range that also covers clients would let a spoofed entry through.
-    ipAddress: { trustedProxies: ["130.211.0.0/22", "35.191.0.0/16"] },
+    // request would key on the load balancer's address. Keep the list narrow: a broad range that also covers clients
+    // would let a spoofed entry through.
+    ipAddress: { trustedProxies: env.PROXY_SECRET ? [...CLOUDFLARE_IPS, ...GOOGLE_LB_IPS] : GOOGLE_LB_IPS },
   },
   session: { expiresIn: 60 * 60 * 24 * 30, updateAge: 60 * 60 * 24 },
   rateLimit: { enabled: true, storage: "database" },

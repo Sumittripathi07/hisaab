@@ -116,6 +116,7 @@ Names only. Values never go in git, chat or CI logs.
 |---|---|
 | `HISAAB_DATABASE_URL` | `infra/setup.sh` (generated, written together with the SQL user's password) |
 | `HISAAB_BETTER_AUTH_SECRET` | `infra/setup.sh` (generated) |
+| `HISAAB_PROXY_SECRET` | `infra/setup.sh` (generated); the Cloudflare Worker gets a copy ([`infra/cloudflare-worker`](infra/cloudflare-worker/README.md)) |
 | `HISAAB_GOOGLE_CLIENT_ID` | the owner, from the Google OAuth client |
 | `HISAAB_GOOGLE_CLIENT_SECRET` | the owner, from the Google OAuth client |
 | `HISAAB_SMTP_URL` | the owner: `smtps://<user>%40gmail.com:<app password>@smtp.gmail.com:465` |

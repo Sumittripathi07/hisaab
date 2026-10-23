@@ -1,0 +1,13 @@
+# Cloudflare Worker in front of Cloud Run for hisab.sumittripathi.dev. Deploy steps: README.md in this folder.
+# PROXY_SECRET is not here: it is a Worker secret (`wrangler secret put PROXY_SECRET`), copied from Secret Manager.
+name = "hisab-proxy"
+main = "src/index.js"
+compatibility_date = "2026-10-01"
+# Only the custom domain serves the Worker: no second public URL on *.workers.dev, and no per-version preview URLs.
+workers_dev = false
+preview_urls = false
+# A Workers Custom Domain: Cloudflare creates the DNS record and the certificate on deploy.
+routes = [{ pattern = "hisab.sumittripathi.dev", custom_domain = true }]
+
+[vars]
+ORIGIN = "https://hisaab-web-27933145966.asia-south1.run.app"
