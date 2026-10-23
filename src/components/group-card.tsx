@@ -32,7 +32,8 @@ export function GroupCard({ group }: { group: GroupListItem }) {
         {/* DIRECT groups (Phase 4) never reach these lists. */}
         <Badge variant="secondary">{GROUP_TYPES[group.type as GroupType]?.label}</Badge>
       </div>
-      <div className="flex items-center justify-between gap-3">
+      {/* Wraps when the balance doesn't fit beside five avatars, rather than cutting the amount short. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
         <div className="flex -space-x-1.5" aria-hidden>
           {group.previewMembers.map((m, i) => (
             <UserAvatar key={i} name={m.displayName} image={m.image} size="sm" className="ring-2 ring-card" />
@@ -44,8 +45,8 @@ export function GroupCard({ group }: { group: GroupListItem }) {
           )}
         </div>
         {/* In words as well as colour. */}
-        <span className="min-w-0 text-right">
-          <span className={cn("block truncate text-sm font-semibold tabular-nums", TONE_CLASS[balance.tone])}>{balance.text}</span>
+        <span className="ml-auto text-right">
+          <span className={cn("block text-sm font-semibold tabular-nums", TONE_CLASS[balance.tone])}>{balance.text}</span>
           <span className="block text-xs font-semibold tracking-wider text-muted-foreground">{group.baseCurrency}</span>
         </span>
       </div>
