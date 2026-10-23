@@ -272,4 +272,39 @@ describe("activity feeds", () => {
     await expect(listEntityHistory(mallory.id, "expense", id)).rejects.toBeInstanceOf(ForbiddenError);
     await expect(listEntityHistory(mallory.id, "settlement", "nope")).rejects.toBeInstanceOf(ForbiddenError);
   });
+
+  it("links a row to its expense or payment only while that still exists", async () => {
+    const asha = await createUser({ name: "Asha" });
+    const ravi = await createUser({ name: "Ravi" });
+    const g = await createGroup(asha.id);
+    const ashaM = await memberOf(g.id, asha.id);
+    const raviM = await addMember(g.id, { userId: ravi.id });
+    const expense = (description: string) =>
+      createExpense(asha.id, {
+        groupId: g.id,
+        description,
+        amount: 100000n,
+        category: "food",
+        date: "2026-10-20",
+        notes: null,
+        payers: [{ memberId: ashaM.id, value: 100000n }],
+        split: { method: "EQUAL", memberIds: [ashaM.id, raviM.id], adjustments: [] },
+      });
+    const { id: kept } = await expense("Kept");
+    const { id: gone } = await expense("Gone");
+    await addComment(ravi.id, { kind: "expense", id: kept }, "Thanks");
+    const { id: payment } = await recordSettlement(ravi.id, { groupId: g.id, fromMemberId: raviM.id, toMemberId: ashaM.id, amount: 50000n, method: "UPI", date: "2026-10-21", note: null });
+    await addComment(ravi.id, { kind: "settlement", id: payment }, "Sent");
+    await deleteExpense(asha.id, gone);
+
+    const hrefs = (await listGroupActivity(asha.id, g.id)).items.map((i) => [i.kind, i.href]);
+    const expenseHref = `/groups/${g.id}/expenses/${kept}`;
+    const paymentHref = `/groups/${g.id}/settlements/${payment}`;
+    expect(hrefs).toEqual(expect.arrayContaining([["expense.created", expenseHref], ["settlement.created", paymentHref]]));
+    // both comments, newest first: the one on the payment, then the one on the expense
+    expect(hrefs.filter(([kind]) => kind === "comment.created").map(([, href]) => href)).toEqual([paymentHref, expenseHref]);
+    // the deleted expense's rows have nothing to open
+    const goneRows = (await listMyActivity(asha.id)).items.filter((i) => i.entityId === gone);
+    expect(goneRows.map((i) => [i.kind, i.href])).toEqual([["expense.deleted", null], ["expense.created", null]]);
+  });
 });

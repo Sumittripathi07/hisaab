@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 import { GroupPageFab } from "@/components/add-expense-fab";
+import { ActivityFeed } from "@/components/activity-feed";
 import { BalancePanel } from "@/components/balance-panel";
 import { ExpenseFilterBar } from "@/components/expense-filters";
 import { ExpenseList } from "@/components/expense-list";
@@ -16,7 +17,9 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { parseFilters, toQuery } from "@/lib/expense-filters";
 import { GROUP_TYPES, groupTint, type GroupType } from "@/lib/group-meta";
+import { PAGE_SIZE, parseLimit } from "@/lib/page-limit";
 import { cn } from "@/lib/utils";
+import { listGroupActivity } from "@/server/activity";
 import { getGroupBalances } from "@/server/balances";
 import { ForbiddenError } from "@/server/errors";
 import { getExpenseFormData, listExpenses } from "@/server/expenses";
@@ -27,8 +30,7 @@ import { listSettlements } from "@/server/settlements";
 
 export const metadata: Metadata = { title: "Group · Hisaab" };
 
-const PAGE_SIZE = 50;
-const MAX_LIMIT = 500;
+const TAB_LABELS = { expenses: "Expenses", balances: "Balances", activity: "Activity" } as const;
 
 export default async function GroupPage({ params, searchParams }: PageProps<"/groups/[groupId]">) {
   const user = await requireOnboardedUser();
@@ -40,15 +42,17 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
   const isAdmin = me.role !== "MEMBER";
   const archived = group.archivedAt !== null;
   const link = inviteUrl(group.inviteCode);
-  // "Show more" asks for another page's worth; a hand-edited limit is kept within what the list allows.
-  const limit = Math.min(MAX_LIMIT, Math.max(PAGE_SIZE, Math.trunc(Number([query.limit].flat()[0])) || PAGE_SIZE));
+  // "Show more" asks for another page's worth.
+  const limit = parseLimit(query.limit);
   const filters = parseFilters(query);
   const filtered = Object.keys(filters).length > 0;
-  const tab = [query.tab].flat()[0] === "balances" ? "balances" : "expenses";
-  // Only the tab on show is read; the add-expense sheet is on both.
-  const [expenses, balances, formData] = await Promise.all([
+  const rawTab = [query.tab].flat()[0];
+  const tab = rawTab === "balances" || rawTab === "activity" ? rawTab : "expenses";
+  // Only the tab on show is read; the add-expense sheet is on all of them.
+  const [expenses, balances, activity, formData] = await Promise.all([
     tab === "expenses" ? listExpenses(user.id, group.id, filters, limit) : null,
     tab === "balances" ? Promise.all([getGroupBalances(user.id, group.id), listSettlements(user.id, group.id)]) : null,
+    tab === "activity" ? listGroupActivity(user.id, group.id, limit) : null,
     archived ? null : getExpenseFormData(user.id, group.id),
   ]);
 
@@ -119,9 +123,16 @@ export default async function GroupPage({ params, searchParams }: PageProps<"/gr
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <section aria-labelledby="tab-heading" className="min-w-0 space-y-4">
           <h2 id="tab-heading" className="sr-only">
-            {tab === "balances" ? "Balances" : "Expenses"}
+            {TAB_LABELS[tab]}
           </h2>
           <GroupTabs groupId={group.id} current={tab} />
+          {activity && (
+            <ActivityFeed
+              items={activity.items}
+              hasMore={activity.hasMore}
+              moreHref={`/groups/${group.id}?tab=activity&limit=${limit + PAGE_SIZE}`}
+            />
+          )}
           {balances && <BalancePanel groupId={group.id} balances={balances[0]} settlements={balances[1]} archived={archived} />}
           {expenses && (
             <>

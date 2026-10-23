@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import type { ActivityKind, ActivityPayloads, ActivityView } from "@/lib/activity";
+import { linkTarget, type ActivityKind, type ActivityPayloads, type ActivityView } from "@/lib/activity";
 import type { Prisma } from "@/generated/prisma/client";
 import { requireMember, requireMemberFor } from "./authz";
 
@@ -48,17 +48,33 @@ async function toItems(rows: Prisma.ActivityGetPayload<{ include: typeof WITH_GR
   );
 }
 
+/** A feed row, with the page of the expense or payment it is about (null for member rows, and once that was deleted). */
+export type FeedItem = ActivityItem & { href: string | null };
+
+/** Two queries for the whole page, not one per row: which of the expenses and payments it mentions still exist. */
+async function withLinks(items: ActivityItem[]): Promise<FeedItem[]> {
+  const targets = items.map((item) => linkTarget(item));
+  const idsOf = (kind: "expense" | "settlement") => [...new Set(targets.flatMap((t) => (t?.kind === kind ? [t.id] : [])))];
+  const where = (kind: "expense" | "settlement") => ({ where: { id: { in: idsOf(kind) }, deletedAt: null }, select: { id: true } });
+  const [expenses, settlements] = await Promise.all([db.expense.findMany(where("expense")), db.settlement.findMany(where("settlement"))]);
+  const live = new Set([...expenses, ...settlements].map((e) => e.id));
+  return items.map((item, i) => {
+    const target = targets[i];
+    return { ...item, href: target && live.has(target.id) ? `/groups/${item.groupId}/${target.kind}s/${target.id}` : null };
+  });
+}
+
 const clamp = (limit: number) => Math.min(500, Math.max(1, Math.trunc(limit) || 1));
 
-export async function listGroupActivity(userId: string, groupId: string, limit = 50): Promise<{ items: ActivityItem[]; hasMore: boolean }> {
+export async function listGroupActivity(userId: string, groupId: string, limit = 50): Promise<{ items: FeedItem[]; hasMore: boolean }> {
   const { member } = await requireMember(userId, groupId);
   const take = clamp(limit);
   const rows = await db.activity.findMany({ where: { groupId }, orderBy: [...NEWEST_FIRST], take: take + 1, include: WITH_GROUP });
-  return { items: await toItems(rows.slice(0, take), new Map([[groupId, member.id]])), hasMore: rows.length > take };
+  return { items: await withLinks(await toItems(rows.slice(0, take), new Map([[groupId, member.id]]))), hasMore: rows.length > take };
 }
 
 /** Every group the user is in now; a group they left is no longer theirs to read. */
-export async function listMyActivity(userId: string, limit = 50): Promise<{ items: ActivityItem[]; hasMore: boolean }> {
+export async function listMyActivity(userId: string, limit = 50): Promise<{ items: FeedItem[]; hasMore: boolean }> {
   const mine = await db.groupMember.findMany({ where: { userId, leftAt: null }, select: { id: true, groupId: true } });
   const take = clamp(limit);
   const rows = await db.activity.findMany({
@@ -67,7 +83,7 @@ export async function listMyActivity(userId: string, limit = 50): Promise<{ item
     take: take + 1,
     include: WITH_GROUP,
   });
-  return { items: await toItems(rows.slice(0, take), new Map(mine.map((m) => [m.groupId, m.id]))), hasMore: rows.length > take };
+  return { items: await withLinks(await toItems(rows.slice(0, take), new Map(mine.map((m) => [m.groupId, m.id])))), hasMore: rows.length > take };
 }
 
 /** What happened to one expense or payment, newest first. Comments on it are listed separately. */

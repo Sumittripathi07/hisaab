@@ -262,3 +262,24 @@ test("outsiders get a 404 for an expense", async ({ browser }) => {
   await mallory.goto(asha.url());
   await expect(mallory.getByRole("heading", { name: "We couldn't find that page" })).toBeVisible();
 });
+
+test("activity tells each person what they owe", async ({ browser }) => {
+  const asha = await signedInPage(browser, "asha.expenses@example.test", "Asha");
+  const groupUrl = await createGroupViaUi(asha, "Goa Trip");
+  const ravi = await inviteAndJoin(asha, browser, "ravi.expenses@example.test", "Ravi");
+  await addExpenseViaUi(asha, { amount: "1480", description: "Dinner at Thalassa" });
+
+  await asha.goto(`${groupUrl}?tab=activity`);
+  const mine = asha.getByRole("listitem").filter({ hasText: "Dinner at Thalassa" });
+  await expect(mine).toContainText("You added “Dinner at Thalassa”");
+  await expect(mine).toContainText("you get back ₹740");
+
+  await ravi.goto("/activity");
+  await expect(ravi.getByRole("heading", { name: "Activity", level: 1 })).toBeVisible();
+  const theirs = ravi.getByRole("listitem").filter({ hasText: "Dinner at Thalassa" });
+  await expect(theirs).toContainText("Asha added “Dinner at Thalassa”");
+  await expect(theirs).toContainText("you owe ₹740");
+  await expect(theirs).toContainText("Goa Trip");
+  await theirs.getByRole("link").click();
+  await expect(ravi.getByRole("heading", { name: "Dinner at Thalassa", level: 1 })).toBeVisible();
+});

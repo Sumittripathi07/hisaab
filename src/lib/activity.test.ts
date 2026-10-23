@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeActivity, type ActivityView } from "./activity";
+import { describeActivity, linkTarget, type ActivityView } from "./activity";
 
 const names = { p: "Priya", a: "Asha", r: "Ravi" };
 const base = { currency: "INR", names };
@@ -110,4 +110,20 @@ describe("describeActivity", () => {
     expect(
       describeActivity({ kind: "member.left", actorMemberId: "gone", viewerMemberId: "a", ...base, payload: { memberId: "gone", displayName: "Zed" } }).title,
     ).toBe("Someone left the group"));
+});
+
+describe("linkTarget", () => {
+  const row = (kind: ActivityView["kind"], payload: object, entityId = "x") =>
+    linkTarget({ kind, payload, entityId, actorMemberId: "a", viewerMemberId: "a", ...base } as ActivityView & { entityId: string });
+
+  it("points expense and payment rows at their own entity", () => {
+    expect(row("expense.created", {}, "e1")).toEqual({ kind: "expense", id: "e1" });
+    expect(row("settlement.disputed", {}, "s1")).toEqual({ kind: "settlement", id: "s1" });
+  });
+
+  it("points a comment at its target, not at the comment", () => {
+    expect(row("comment.created", { targetKind: "settlement", targetId: "s9" }, "c1")).toEqual({ kind: "settlement", id: "s9" });
+  });
+
+  it("has nothing for member rows", () => expect(row("member.joined", {})).toBeNull());
 });

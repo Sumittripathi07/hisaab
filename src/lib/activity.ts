@@ -62,6 +62,14 @@ export type ActivityText = {
   money: { text: string; tone: "owe" | "owed" } | null;
 };
 
+/** The expense or payment a row is about, if any. A comment row's own entity is the comment, so it points at its target. */
+export function linkTarget(a: ActivityView & { entityId: string }): { kind: "expense" | "settlement"; id: string } | null {
+  if (a.kind === "comment.created") return { kind: a.payload.targetKind, id: a.payload.targetId };
+  if (a.kind.startsWith("expense.")) return { kind: "expense", id: a.entityId };
+  if (a.kind.startsWith("settlement.")) return { kind: "settlement", id: a.entityId };
+  return null;
+}
+
 const EXPENSE_VERB = { "expense.created": "added", "expense.updated": "edited", "expense.deleted": "deleted", "expense.restored": "restored" } as const;
 const PAYMENT_VERB = { "settlement.updated": "edited", "settlement.deleted": "deleted", "settlement.restored": "restored" } as const;
 
